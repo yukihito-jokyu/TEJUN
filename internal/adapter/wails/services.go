@@ -12,18 +12,24 @@ import (
 
 type (
 	StartupService      struct{ startup *application.Startup }
-	PreparationService  struct{}
+	PreparationService  struct{ preparation *application.Preparation }
 	ExecutionService    struct{}
 	ProcedureService    struct{}
-	AgentControlService struct{ control *application.AgentControl }
+	AgentControlService struct {
+		control     *application.AgentControl
+		preparation *application.PreparationAgentControl
+	}
 )
 
 func NewStartupService(startup *application.Startup) *StartupService {
 	return &StartupService{startup: startup}
 }
 
-func NewAgentControlService(control *application.AgentControl) *AgentControlService {
-	return &AgentControlService{control: control}
+func NewAgentControlService(
+	control *application.AgentControl,
+	preparation *application.PreparationAgentControl,
+) *AgentControlService {
+	return &AgentControlService{control: control, preparation: preparation}
 }
 
 type EnvironmentVariableInput struct {
@@ -71,6 +77,35 @@ type RespondToElicitationInput struct {
 	Action               string `json:"action"`
 	Content              string `json:"content"`
 	OperationID          string `json:"operationId"`
+}
+
+type CancelAgentOperationInput struct {
+	SessionID   string `json:"sessionId"`
+	TurnID      string `json:"turnId,omitempty"`
+	RunID       string `json:"runId,omitempty"`
+	JobID       string `json:"jobId,omitempty"`
+	OperationID string `json:"operationId"`
+}
+
+type CancellationAccepted struct {
+	JobID        string `json:"jobId"`
+	TargetStatus string `json:"targetStatus"`
+	RequestedAt  string `json:"requestedAt"`
+	Mechanism    string `json:"mechanism"`
+}
+
+type AgentSessionConfigurationChange struct {
+	Kind     string `json:"kind"`
+	ModeID   string `json:"modeId,omitempty"`
+	ConfigID string `json:"configId,omitempty"`
+	Value    any    `json:"value,omitempty"`
+}
+
+type SetAgentSessionConfigurationInput struct {
+	SessionID        string                          `json:"sessionId"`
+	ExpectedRevision int64                           `json:"expectedRevision"`
+	OperationID      string                          `json:"operationId"`
+	Change           AgentSessionConfigurationChange `json:"change"`
 }
 
 type AgentCandidate struct {
