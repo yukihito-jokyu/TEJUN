@@ -1,0 +1,23 @@
+version: "2"
+
+run:
+  timeout: 2m
+
+linters:
+  default: standard
+  enable:
+    - nolintlint
+    - wsl_v5
+  settings:
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+    - golines
+  settings:
+    golines:
+      max-len: 120

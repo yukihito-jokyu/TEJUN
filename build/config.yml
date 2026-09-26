@@ -1,0 +1,27 @@
+version: "3"
+
+info:
+  companyName: "Yukihito"
+  productName: "TEJUN"
+  productIdentifier: "com.yukihito.tejun"
+  description: "AIと人間が検証済みの手順書を作成するデスクトップアプリケーション"
+  copyright: "Copyright Yukihito"
+  version: "0.1.0"
+
+dev_mode:
+  root_path: .
+  log_level: warn
+  debounce: 1000
+  ignore:
+    dir: [.git, node_modules, frontend, bin]
+    file: [.DS_Store, .gitignore, "*_test.go"]
+    watched_extension: ["*.go", "*.sql"]
+    git_ignore: true
+  executes:
+    - cmd: task build:dev
+      type: blocking
+    - cmd: npm --prefix frontend run dev -- --port 9245 --strictPort
+      type: background
+    - cmd: ./bin/tejun
+      type: primary
+      exit_policy: shutdown

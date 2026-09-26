@@ -1,0 +1,119 @@
+version: "3"
+
+vars:
+  GO_VERSION: 1.26.6
+  NODE_VERSION: 24.9.0
+  NPM_VERSION: 11.12.1
+  TASK_VERSION: 3.45.5
+  GOLANGCI_LINT_VERSION: 2.12.2
+
+tasks:
+  check-tools:
+    internal: true
+    preconditions:
+      - sh: go env GOVERSION | grep -qx 'go{{.GO_VERSION}}'
+        msg: Go {{.GO_VERSION}}を使用してください
+      - sh: node --version | grep -qx 'v{{.NODE_VERSION}}'
+        msg: Node {{.NODE_VERSION}}を使用してください
+      - sh: npm --version | grep -qx '{{.NPM_VERSION}}'
+        msg: npm {{.NPM_VERSION}}を使用してください
+      - sh: task --version | grep -qx '{{.TASK_VERSION}}'
+        msg: Task {{.TASK_VERSION}}を使用してください
+
+  check-lint-tool:
+    internal: true
+    deps: [check-tools]
+    preconditions:
+      - sh: golangci-lint version | grep -Eq 'version {{.GOLANGCI_LINT_VERSION}}([[:space:]]|$)'
+        msg: golangci-lint {{.GOLANGCI_LINT_VERSION}}を使用してください
+
+  dev:
+    desc: Wailsアプリを開発モードで起動する
+    deps: [check-tools]
+    cmds:
+      - go tool wails3 dev -config ./build/config.yml -port 9245
+
+  bindings:
+    desc: GoからTypeScript Bindingを生成する
+    deps: [check-tools]
+    cmds:
+      - go tool wails3 generate bindings -clean=true -ts -i ./internal/bootstrap ./internal/adapter/wails/...
+
+  bindings:check:
+    desc: Bindingを再生成し、追跡済み契約との差分を検査する
+    cmds:
+      - task: bindings
+      - git diff --exit-code -- frontend/bindings
+      - |
+        if [ -n "${CI:-}" ] || git ls-files -- frontend/bindings | grep -q .; then
+          test -z "$(git status --porcelain=v1 --untracked-files=all -- frontend/bindings)"
+        else
+          true
+        fi
+
+  fmt:
+    desc: GoとFrontendを整形する
+    deps: [check-lint-tool]
+    cmds:
+      - golangci-lint run --fix --enable-only wsl_v5 ./...
+      - golangci-lint fmt ./...
+      - npm --prefix frontend run fmt
+
+  lint:
+    desc: GoとFrontendのLint・整形を検査する
+    deps: [check-lint-tool]
+    cmds:
+      - golangci-lint config verify
+      - golangci-lint run ./...
+      - npm --prefix frontend run lint
+      - npm --prefix frontend run fmt:check
+
+  test:
+    desc: Go race testとFrontend unit testを実行する
+    deps: [check-tools]
+    cmds:
+      - go test -race ./...
+      - npm --prefix frontend run test
+
+  e2e:
+    desc: Wails開発起動で最小Playwright smoke testを実行する
+    deps: [check-tools]
+    cmds:
+      - npm --prefix frontend run test:e2e
+
+  build:
+    desc: Binding、Frontend、macOS用バイナリをbuildする
+    deps: [check-tools]
+    cmds:
+      - task: bindings
+      - npm --prefix frontend run build
+      - go build -tags production -trimpath -buildvcs=false -o bin/tejun ./cmd/tejun
+
+  storybook:
+    desc: Storybookを起動する
+    deps: [check-tools]
+    cmds:
+      - npm --prefix frontend run storybook
+
+  storybook:build:
+    desc: Storybookの静的buildを検証する
+    deps: [check-tools]
+    cmds:
+      - npm --prefix frontend run storybook:build
+
+  build:dev:
+    desc: Wails開発起動用バイナリをbuildする
+    deps: [check-tools]
+    cmds:
+      - task: bindings
+      - go build -buildvcs=false -o bin/tejun ./cmd/tejun
+
+  check:
+    desc: Binding・静的検査・test・build・E2Eを実行する
+    cmds:
+      - task: bindings:check
+      - task: lint
+      - task: test
+      - task: build
+      - task: storybook:build
+      - task: e2e
