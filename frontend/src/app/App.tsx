@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
 import type { AgentConnectionInput } from "@/features/setup-connection/ui/SetupConnection";
+import { PreparationRoute } from "@/pages/preparation/PreparationRoute";
 import { SetupPage } from "@/pages/setup/SetupPage";
 import { ProjectListPage } from "@/pages/projects/ProjectListPage";
 import {
@@ -22,6 +23,7 @@ type ViewError = { code: string; message: string; retryable: boolean };
 
 export function App() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [loading, setLoading] = useState(true);
   const [candidates, setCandidates] = useState<AgentCandidate[]>([]);
   const [connection, setConnection] = useState<AgentConnectionInput>();
@@ -139,8 +141,8 @@ export function App() {
   useEffect(() => {
     if (started.current) return;
     started.current = true;
-    loadStartup(true).catch(() => undefined);
-  }, [loadStartup]);
+    loadStartup(!/^\/projects\/[^/]+\/prepare$/.test(location.pathname)).catch(() => undefined);
+  }, [loadStartup, location.pathname]);
 
   useEffect(() => {
     const unsubscribeEvent = onAppEvent(
@@ -237,6 +239,8 @@ export function App() {
         }
       />
       <Route path="/projects" element={<ProjectListPage />} />
+      <Route path="/projects/:projectId/prepare" element={<PreparationRoute />} />
+      <Route path="/projects/:projectId/check" element={<ExecutionPlaceholder />} />
       <Route path="/projects/:projectId/*" element={<UnimplementedProjectStage />} />
       <Route path="*" element={<Navigate to="/setup" replace />} />
     </Routes>
@@ -249,6 +253,15 @@ function UnimplementedProjectStage() {
       <h1>この工程はまだ利用できません</h1>
       <p>プロジェクトは保存されています。一覧から作業を確認できます。</p>
       <a href="#/projects">プロジェクト一覧へ戻る</a>
+    </main>
+  );
+}
+
+function ExecutionPlaceholder() {
+  return (
+    <main aria-label="動作チェック">
+      <h1>動作チェック</h1>
+      <p>動作チェックの準備が完了しました。</p>
     </main>
   );
 }
