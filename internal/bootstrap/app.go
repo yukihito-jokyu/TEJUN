@@ -49,6 +49,7 @@ func Run(assets fs.FS) (runErr error) {
 	defer func() { runErr = errors.Join(runErr, db.Close()) }()
 
 	repository := appsqlite.NewAgentConnectionRepository(db)
+	preparationRepository := appsqlite.NewPreparationRepository(db)
 
 	now := func() time.Time { return time.Now().UTC() }
 	if err := repository.FailInterruptedAgentJobs(context.Background(), now()); err != nil {
@@ -56,6 +57,10 @@ func Run(assets fs.FS) (runErr error) {
 	}
 
 	if err := repository.FailInterruptedElicitations(context.Background(), now()); err != nil {
+		return err
+	}
+
+	if err := preparationRepository.FailInterruptedPreparationJobs(context.Background(), now()); err != nil {
 		return err
 	}
 
@@ -93,6 +98,8 @@ func Run(assets fs.FS) (runErr error) {
 	manager := appacp.NewManager(repository, now, newID)
 	startup := appusecase.NewStartup(repository, appacp.NewCodexScanner(dataDir, now), manager, now, newID)
 	agentControl := appusecase.NewAgentControl(repository, manager, manager, now, newID)
+	preparation := appusecase.NewPreparation(preparationRepository, now, newID)
+	preparationAgentControl := appusecase.NewPreparationAgentControl(preparationRepository, manager, now, newID)
 	projects := appusecase.NewProjectUseCases(projectRepository, appworkspace.Validator{}, now, newID)
 	projectExternal := appusecase.NewProjectExternal(projectExternalRepository, exporter, now, newID)
 	projectService := appwails.NewProjectService(projects, projectExternal)
@@ -104,10 +111,13 @@ func Run(assets fs.FS) (runErr error) {
 		Services: []application.Service{
 			application.NewServiceWithOptions(appwails.NewStartupService(startup), serviceOptions),
 			application.NewServiceWithOptions(projectService, serviceOptions),
-			application.NewServiceWithOptions(&appwails.PreparationService{}, serviceOptions),
+			application.NewServiceWithOptions(appwails.NewPreparationService(preparation), serviceOptions),
 			application.NewServiceWithOptions(&appwails.ExecutionService{}, serviceOptions),
 			application.NewServiceWithOptions(&appwails.ProcedureService{}, serviceOptions),
-			application.NewServiceWithOptions(appwails.NewAgentControlService(agentControl), serviceOptions),
+			application.NewServiceWithOptions(
+				appwails.NewAgentControlService(agentControl, preparationAgentControl),
+				serviceOptions,
+			),
 		},
 		Assets: application.AssetOptions{Handler: application.AssetFileServerFS(assets)},
 		Mac:    application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: true},
@@ -116,9 +126,11 @@ func Run(assets fs.FS) (runErr error) {
 
 	var workers sync.WaitGroup
 
-	workers.Add(3)
+	workers.Add(5)
 	go runAgentWorker(workerContext, &workers, repository, manager, now)
 	go runProjectWorker(workerContext, &workers, projectExternalRepository, manager, exporter, now)
+	go runPreparationWorker(workerContext, &workers, preparationRepository, manager, now)
+	go runPreparationCancellationWorker(workerContext, &workers, preparationRepository, manager, now)
 	go runEventDispatcher(workerContext, &workers, repository, app.Event.Emit, now)
 
 	app.OnShutdown(func() {
@@ -148,6 +160,50 @@ func runProjectWorker(
 
 	for {
 		_, _ = appusecase.RunProjectJob(ctx, repository, manager, exporter, now)
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func runPreparationWorker(
+	ctx context.Context,
+	wg *sync.WaitGroup,
+	repository *appsqlite.PreparationRepository,
+	manager *appacp.Manager,
+	now func() time.Time,
+) {
+	defer wg.Done()
+
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		_, _ = appusecase.RunPreparationJob(ctx, repository, manager, now)
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func runPreparationCancellationWorker(
+	ctx context.Context,
+	wg *sync.WaitGroup,
+	repository *appsqlite.PreparationRepository,
+	manager *appacp.Manager,
+	now func() time.Time,
+) {
+	defer wg.Done()
+
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		_, _ = appusecase.RunPreparationCancellation(ctx, repository, manager, now)
 		select {
 		case <-ctx.Done():
 			return

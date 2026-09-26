@@ -70,6 +70,9 @@ vi.mock("@/shared/api/wails", () => ({
   onSystemWake: vi.fn(() => vi.fn()),
   parseAppError: vi.fn(() => null),
 }));
+vi.mock("@/pages/preparation/PreparationRoute", () => ({
+  PreparationRoute: () => <h1>準備画面</h1>,
+}));
 
 afterEach(cleanup);
 
@@ -89,6 +92,62 @@ beforeEach(() => {
 });
 
 describe("App routing", () => {
+  it("一覧から準備画面へ進む", async () => {
+    vi.mocked(getStartupState).mockResolvedValue({
+      initialSetupRequired: false,
+      nextRoute: "/projects",
+      defaultConnection: undefined,
+      changeSequence: 1,
+    });
+    vi.mocked(listProjects).mockResolvedValue({
+      items: [
+        {
+          projectId: "p1",
+          name: "準備中",
+          description: "",
+          workspacePath: "/tmp/project",
+          status: "preparing",
+          currentStage: "preparation",
+          progress: { completed: 0, total: 3 },
+          attentionRank: 0,
+          attentionReason: null,
+          updatedAt: "2026-09-26T00:00:00Z",
+          completedAt: null,
+          resumeRoute: "#/projects/p1/prepare",
+          currentProcedureId: null,
+          connectionState: "disconnected",
+          errorSummary: null,
+          revision: 1,
+        },
+      ],
+      total: 1,
+      nextCursor: null,
+      generatedAt: "",
+      changeSequence: 1,
+    });
+    render(
+      <MemoryRouter initialEntries={["/projects"]}>
+        <App />
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "開く" }));
+    expect(await screen.findByRole("heading", { name: "準備画面" })).toBeTruthy();
+  });
+
+  it("project ID付き準備URLをセットアップへ戻さない", async () => {
+    vi.mocked(getStartupState).mockResolvedValue({
+      initialSetupRequired: false,
+      nextRoute: "/projects",
+      defaultConnection: undefined,
+      changeSequence: 1,
+    });
+    render(
+      <MemoryRouter initialEntries={["/projects/p1/prepare"]}>
+        <App />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole("heading", { name: "準備画面" })).toBeTruthy();
+  });
   it.each([
     { initialSetupRequired: true, nextRoute: "/setup", heading: "AIエージェントを接続" },
     { initialSetupRequired: false, nextRoute: "/projects", heading: "作業を続ける" },

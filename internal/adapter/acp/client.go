@@ -29,7 +29,81 @@ func (client) RequestPermission(context.Context, sdk.RequestPermissionRequest) (
 	return sdk.RequestPermissionResponse{}, errUnsupportedClientOperation
 }
 
-func (client) SessionUpdate(context.Context, sdk.SessionNotification) error { return nil }
+func (c client) SessionUpdate(ctx context.Context, notification sdk.SessionNotification) error {
+	var (
+		sessionID string
+		sequence  int64
+		modes     *application.SessionModes
+		options   []application.SessionConfigOption
+	)
+
+	c.manager.mu.Lock()
+	for appSessionID, session := range c.manager.sessions {
+		if session.agentSessionID != notification.SessionId || session.probe.ProcessGeneration != c.generation {
+			continue
+		}
+
+		if notification.Update.CurrentModeUpdate != nil && session.modes != nil {
+			copyModes := *session.modes
+			copyModes.CurrentModeID = string(notification.Update.CurrentModeUpdate.CurrentModeId)
+			session.modes = &copyModes
+			modes = &copyModes
+		}
+
+		if notification.Update.ConfigOptionUpdate != nil {
+			session.configOptions = preparationConfigOptions(notification.Update.ConfigOptionUpdate.ConfigOptions)
+			options = session.configOptions
+		}
+
+		if modes != nil || options != nil {
+			session.receiveSequence++
+			sequence = session.receiveSequence
+			sessionID = appSessionID
+		}
+
+		if session.pendingTurnID == "" {
+			break
+		}
+
+		role, chunk := "", ""
+		if update := notification.Update.AgentMessageChunk; update != nil && update.Content.Text != nil {
+			role, chunk = "agent", update.Content.Text.Text
+		}
+
+		if update := notification.Update.AgentThoughtChunk; update != nil && update.Content.Text != nil {
+			role, chunk = "thought", update.Content.Text.Text
+		}
+
+		if role == "" {
+			break
+		}
+
+		if len(session.messages) == 0 || session.messages[len(session.messages)-1].Role != role {
+			session.messages = append(
+				session.messages,
+				application.ConversationItem{
+					MessageID: c.manager.newID(),
+					TurnID:    session.pendingTurnID,
+					Role:      role,
+					Status:    "completed",
+					CreatedAt: c.manager.now(),
+					Content:   []application.ContentPart{{Type: "text", Text: chunk}},
+				},
+			)
+		} else {
+			session.messages[len(session.messages)-1].Content[0].Text += chunk
+		}
+
+		break
+	}
+	c.manager.mu.Unlock()
+
+	if sessionID != "" && c.manager.sink != nil {
+		return c.manager.sink.UpdateSessionConfiguration(ctx, sessionID, sequence, modes, options, c.manager.now())
+	}
+
+	return nil
+}
 
 func (client) CreateTerminal(context.Context, sdk.CreateTerminalRequest) (sdk.CreateTerminalResponse, error) {
 	return sdk.CreateTerminalResponse{}, errUnsupportedClientOperation
@@ -54,7 +128,34 @@ func (client) WaitForTerminalExit(
 	return sdk.WaitForTerminalExitResponse{}, errUnsupportedClientOperation
 }
 
-func (c client) UnstableCompleteElicitation(context.Context, sdk.UnstableCompleteElicitationNotification) error {
+func (c client) UnstableCompleteElicitation(
+	ctx context.Context,
+	notice sdk.UnstableCompleteElicitationNotification,
+) error {
+	if c.manager.sink == nil {
+		return errors.New("elicitation is not configured")
+	}
+
+	id, err := c.manager.sink.CompleteURLElicitation(
+		ctx,
+		string(notice.ElicitationId),
+		c.attemptID,
+		c.generation,
+		c.manager.now(),
+	)
+	if err != nil {
+		return err
+	}
+
+	c.manager.mu.Lock()
+	response := c.manager.elicitations[id]
+	delete(c.manager.elicitations, id)
+	c.manager.mu.Unlock()
+
+	if response != nil {
+		response <- application.ElicitationResponse{ElicitationRequestID: id, Action: "accept", Content: "{}"}
+	}
+
 	return nil
 }
 
@@ -64,16 +165,40 @@ func (c client) UnstableCreateElicitation(
 ) (sdk.UnstableCreateElicitationResponse, error) {
 	id := c.manager.newID()
 	mode, message := elicitationPrompt(request)
+	sessionID := ""
 
-	if c.manager.sink == nil {
-		return sdk.UnstableCreateElicitationResponse{}, errors.New("elicitation is not configured")
+	c.manager.mu.Lock()
+	for appSessionID, session := range c.manager.sessions {
+		if session.probe.ProcessGeneration == c.generation && session.agentSessionID != "" {
+			sessionID = appSessionID
+			break
+		}
+	}
+	c.manager.mu.Unlock()
+
+	incoming := application.IncomingElicitation{
+		ID:                  id,
+		SessionID:           sessionID,
+		ConnectionAttemptID: c.attemptID,
+		ProcessGeneration:   c.generation,
+		Mode:                mode,
+		Message:             message,
+		RequestedAt:         c.manager.now(),
+	}
+	if sessionID != "" {
+		incoming.Scope = map[string]any{"type": "session", "sessionId": sessionID}
+	} else {
+		incoming.Scope = map[string]any{"type": "request", "requestCorrelationId": id}
 	}
 
-	if err := c.manager.sink.RegisterElicitation(ctx, application.IncomingElicitation{
-		ID: id, ConnectionAttemptID: c.attemptID, ProcessGeneration: c.generation,
-		Mode: mode, Message: message, RequestedAt: c.manager.now(),
-	}); err != nil {
-		return sdk.UnstableCreateElicitationResponse{}, err
+	if request.Form != nil {
+		encoded, _ := json.Marshal(request.Form.RequestedSchema)
+		_ = json.Unmarshal(encoded, &incoming.RequestedSchema)
+	}
+
+	if request.Url != nil {
+		incoming.URL = request.Url.Url
+		incoming.ElicitationID = string(request.Url.ElicitationId)
 	}
 
 	response := make(chan application.ElicitationResponse, 1)
@@ -81,6 +206,22 @@ func (c client) UnstableCreateElicitation(
 	c.manager.mu.Lock()
 	c.manager.elicitations[id] = response
 	c.manager.mu.Unlock()
+
+	if c.manager.sink == nil {
+		c.manager.mu.Lock()
+		delete(c.manager.elicitations, id)
+		c.manager.mu.Unlock()
+
+		return sdk.UnstableCreateElicitationResponse{}, errors.New("elicitation is not configured")
+	}
+
+	if err := c.manager.sink.RegisterElicitation(ctx, incoming); err != nil {
+		c.manager.mu.Lock()
+		delete(c.manager.elicitations, id)
+		c.manager.mu.Unlock()
+
+		return sdk.UnstableCreateElicitationResponse{}, err
+	}
 
 	select {
 	case <-ctx.Done():
@@ -103,7 +244,7 @@ func elicitationPrompt(request sdk.UnstableCreateElicitationRequest) (string, st
 		return "url", request.Url.Message
 	}
 
-	return "", ""
+	return "unsupported", ""
 }
 
 func elicitationResponse(response application.ElicitationResponse) sdk.UnstableCreateElicitationResponse {

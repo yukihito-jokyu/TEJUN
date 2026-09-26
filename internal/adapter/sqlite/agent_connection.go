@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/yukihito-jokyu/TEJUN/internal/application"
 	"github.com/yukihito-jokyu/TEJUN/internal/domain/agentconnection"
 	"github.com/yukihito-jokyu/TEJUN/internal/domain/shared"
@@ -329,6 +330,16 @@ func (r *AgentConnectionRepository) RegisterElicitation(
 	ctx context.Context,
 	incoming application.IncomingElicitation,
 ) error {
+	scopeJSON, err := json.Marshal(incoming.Scope)
+	if err != nil {
+		return err
+	}
+
+	requestedSchemaJSON, err := json.Marshal(incoming.RequestedSchema)
+	if err != nil {
+		return err
+	}
+
 	var expiresAt any
 	if incoming.ExpiresAt != nil {
 		expiresAt = incoming.ExpiresAt.Format(time.RFC3339Nano)
@@ -340,10 +351,24 @@ func (r *AgentConnectionRepository) RegisterElicitation(
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	_, err = tx.ExecContext(ctx, `INSERT INTO elicitation_requests
-(elicitation_request_id, connection_attempt_id, process_generation, mode, message, state, requested_at, expires_at)
-VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)`, incoming.ID, incoming.ConnectionAttemptID, incoming.ProcessGeneration,
-		incoming.Mode, incoming.Message, incoming.RequestedAt.Format(time.RFC3339Nano), expiresAt)
+	_, err = tx.ExecContext(
+		ctx,
+		`INSERT INTO elicitation_requests
+(elicitation_request_id, connection_attempt_id, process_generation, session_id, scope_json, requested_schema_json, url, elicitation_id, mode, message, state, requested_at, expires_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+		incoming.ID,
+		incoming.ConnectionAttemptID,
+		incoming.ProcessGeneration,
+		incoming.SessionID,
+		string(scopeJSON),
+		string(requestedSchemaJSON),
+		incoming.URL,
+		incoming.ElicitationID,
+		incoming.Mode,
+		incoming.Message,
+		incoming.RequestedAt.Format(time.RFC3339Nano),
+		expiresAt,
+	)
 	if err != nil {
 		return err
 	}
@@ -353,6 +378,113 @@ VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)`, incoming.ID, incoming.ConnectionAttemp
 		EmittedAt: incoming.RequestedAt, AggregateType: "elicitation", AggregateID: incoming.ID,
 	}
 	if err := insertOutbox(ctx, tx, event, 1); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (r *AgentConnectionRepository) CompleteURLElicitation(
+	ctx context.Context,
+	elicitationID, attemptID string,
+	generation int64,
+	at time.Time,
+) (string, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var requestID string
+	if err := tx.QueryRowContext(ctx, `SELECT elicitation_request_id FROM elicitation_requests WHERE elicitation_id=? AND connection_attempt_id=? AND process_generation=? AND mode='url' AND state='pending'`, elicitationID, attemptID, generation).
+		Scan(&requestID); err != nil {
+		return "", notFound(err)
+	}
+
+	if _, err := tx.ExecContext(
+		ctx,
+		`UPDATE elicitation_requests SET state='responded',action='accept',responded_at=? WHERE elicitation_request_id=?`,
+		at.Format(time.RFC3339Nano),
+		requestID,
+	); err != nil {
+		return "", err
+	}
+
+	if err := insertOutbox(ctx, tx, application.OutboxEvent{
+		ID: "elicitation:url:" + requestID, Name: "agent.elicitation.updated",
+		EmittedAt: at, AggregateType: "elicitation", AggregateID: requestID,
+	}, 1); err != nil {
+		return "", err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
+
+	return requestID, nil
+}
+
+func (r *AgentConnectionRepository) UpdateSessionConfiguration(
+	ctx context.Context,
+	sessionID string,
+	sequence int64,
+	modes *application.SessionModes,
+	options []application.SessionConfigOption,
+	at time.Time,
+) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var (
+		modesJSON, optionsJSON string
+		current                int64
+	)
+	if err := tx.QueryRowContext(ctx, `SELECT s.modes_json,s.config_options_json,s.acp_receive_sequence FROM preparation_sessions s JOIN projects p ON p.current_session_id=s.session_id WHERE s.session_id=?`, sessionID).
+		Scan(&modesJSON, &optionsJSON, &current); err != nil {
+		return notFound(err)
+	}
+
+	if sequence <= current {
+		return nil
+	}
+
+	if modes != nil {
+		encoded, err := json.Marshal(modes)
+		if err != nil {
+			return err
+		}
+
+		modesJSON = string(encoded)
+	}
+
+	if options != nil {
+		encoded, err := json.Marshal(options)
+		if err != nil {
+			return err
+		}
+
+		optionsJSON = string(encoded)
+	}
+
+	if _, err := tx.ExecContext(
+		ctx,
+		`UPDATE preparation_sessions SET modes_json=?,config_options_json=?,acp_receive_sequence=?,revision=revision+1 WHERE session_id=?`,
+		modesJSON,
+		optionsJSON,
+		sequence,
+		sessionID,
+	); err != nil {
+		return err
+	}
+
+	if err := insertOutbox(ctx, tx, application.OutboxEvent{
+		ID: fmt.Sprintf("session:update:%s:%d", sessionID, sequence), Name: "session.configuration.changed",
+		EmittedAt: at, AggregateType: "session", AggregateID: sessionID,
+	}, 1); err != nil {
 		return err
 	}
 
@@ -420,6 +552,10 @@ func (r *AgentConnectionRepository) ClaimElicitation(
 		return result, false, err
 	}
 
+	if err := validateElicitationAnswer(ctx, tx, claim); err != nil {
+		return application.MutationResult[application.ElicitationResponseResult]{}, false, err
+	}
+
 	result := application.MutationResult[application.ElicitationResponseResult]{
 		Data: application.ElicitationResponseResult{
 			ElicitationRequestID: claim.ElicitationRequestID,
@@ -470,6 +606,61 @@ WHERE elicitation_request_id = ? AND state IN ('pending', 'failed')`,
 	}
 
 	return result, true, nil
+}
+
+func validateElicitationAnswer(ctx context.Context, tx *sql.Tx, claim application.ElicitationClaim) error {
+	if claim.Action != "accept" && claim.Action != "decline" && claim.Action != "cancel" {
+		return &shared.Error{Code: "validation_failed", Message: "回答方法が不正です"}
+	}
+
+	var (
+		mode                  string
+		schemaJSON, expiresAt sql.NullString
+	)
+	if err := tx.QueryRowContext(ctx, `SELECT mode,requested_schema_json,expires_at FROM elicitation_requests WHERE elicitation_request_id=? AND state IN ('pending','failed')`, claim.ElicitationRequestID).
+		Scan(&mode, &schemaJSON, &expiresAt); err != nil {
+		return notFound(err)
+	}
+
+	if expiresAt.Valid {
+		expires, err := time.Parse(time.RFC3339Nano, expiresAt.String)
+		if err != nil {
+			return err
+		}
+
+		if !claim.ClaimedAt.Before(expires) {
+			return &shared.Error{Code: "validation_failed", Message: "回答期限が切れました"}
+		}
+	}
+
+	if claim.Action != "accept" {
+		return nil
+	}
+
+	if mode != "form" || !schemaJSON.Valid {
+		return &shared.Error{Code: "validation_failed", Message: "この確認形式には回答できません"}
+	}
+
+	var content map[string]any
+	if err := json.Unmarshal([]byte(claim.Content), &content); err != nil || content == nil {
+		return &shared.Error{Code: "validation_failed", Message: "回答JSONが不正です"}
+	}
+
+	var schema jsonschema.Schema
+	if err := json.Unmarshal([]byte(schemaJSON.String), &schema); err != nil {
+		return err
+	}
+
+	resolved, err := schema.Resolve(nil)
+	if err != nil {
+		return err
+	}
+
+	if err := resolved.Validate(content); err != nil {
+		return &shared.Error{Code: "validation_failed", Message: "回答がAgentのschemaに一致しません"}
+	}
+
+	return nil
 }
 
 func (r *AgentConnectionRepository) CompleteElicitation(
@@ -685,6 +876,38 @@ func eventData(ctx context.Context, tx *sql.Tx, event application.OutboxEvent) (
 			Status       string `json:"status"`
 			CurrentStage string `json:"currentStage"`
 		}{event.AggregateID, status, stage}, nil
+	case "preparation.changed":
+		var revision int64
+		if err := tx.QueryRowContext(ctx, `SELECT revision FROM preparations WHERE project_id=?`, event.AggregateID).
+			Scan(&revision); err != nil {
+			return nil, nil, err
+		}
+
+		correlation["projectId"] = event.AggregateID
+
+		return correlation, map[string]any{
+			"projectId":     event.AggregateID,
+			"revision":      revision,
+			"changedFields": []string{},
+		}, nil
+	case "session.turn.updated", "session.policy.changed", "session.configuration_changed":
+		var (
+			projectID, state string
+			revision         int64
+		)
+		if err := tx.QueryRowContext(ctx, `SELECT project_id,state,revision FROM preparation_sessions WHERE session_id=?`, event.AggregateID).
+			Scan(&projectID, &state, &revision); err != nil {
+			return nil, nil, err
+		}
+
+		correlation["projectId"] = projectID
+
+		correlation["sessionId"] = event.AggregateID
+		if event.Correlation != "" {
+			correlation["jobId"] = event.Correlation
+		}
+
+		return correlation, map[string]any{"sessionId": event.AggregateID, "status": state, "revision": revision}, nil
 	case "session.connection_changed":
 		var (
 			projectID, sessionID, state string
@@ -695,7 +918,15 @@ func eventData(ctx context.Context, tx *sql.Tx, event application.OutboxEvent) (
 		}
 
 		if err := tx.QueryRowContext(ctx, `SELECT project_id,session_id,state FROM acp_sessions WHERE session_id=? OR project_id=? ORDER BY created_at DESC LIMIT 1`, event.AggregateID, event.AggregateID).
-			Scan(&projectID, &sessionID, &state); err != nil {
+			Scan(&projectID, &sessionID, &state); errors.Is(
+			err,
+			sql.ErrNoRows,
+		) {
+			if err = tx.QueryRowContext(ctx, `SELECT project_id,session_id,state FROM preparation_sessions WHERE session_id=? OR project_id=? ORDER BY started_at DESC LIMIT 1`, event.AggregateID, event.AggregateID).
+				Scan(&projectID, &sessionID, &state); err != nil {
+				return nil, nil, err
+			}
+		} else if err != nil {
 			return nil, nil, err
 		}
 

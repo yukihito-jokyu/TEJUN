@@ -24,7 +24,6 @@ func TestEvidenceStoreOwnershipAndRecovery(t *testing.T) {
 	}
 
 	for _, query := range []string{
-		`INSERT INTO check_plans(project_id,revision) VALUES('project',1)`,
 		`INSERT INTO check_items(check_id,project_id,sequence,title,instruction,expected_result,ai_required,human_required,human_evidence_requirement) VALUES('check','project',1,'t','i','e',0,1,'required')`,
 		`INSERT INTO executions(execution_id,project_id,revision) VALUES('execution','project',1)`,
 		`INSERT INTO procedures(procedure_id,project_id,revision,status,document_json,created_at) VALUES('procedure','project',1,'completed','{}',1)`,

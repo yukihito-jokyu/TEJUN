@@ -7,10 +7,18 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as application$0 from "../../application/models.js";
+
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
 export function AuthenticateAgent(input: $models.AuthenticateAgentInput): $CancellablePromise<$models.MutationResult<$models.AgentJobAccepted>> {
     return $Call.ByID(1005382116, input);
+}
+
+export function CancelAgentOperation(input: $models.CancelAgentOperationInput): $CancellablePromise<$models.MutationResult<$models.CancellationAccepted>> {
+    return $Call.ByID(3271773890, input);
 }
 
 export function LogoutAgent(input: $models.LogoutAgentInput): $CancellablePromise<$models.MutationResult<$models.LogoutAccepted>> {
@@ -19,4 +27,8 @@ export function LogoutAgent(input: $models.LogoutAgentInput): $CancellablePromis
 
 export function RespondToElicitation(input: $models.RespondToElicitationInput): $CancellablePromise<$models.MutationResult<$models.ElicitationResponseResult>> {
     return $Call.ByID(3945556279, input);
+}
+
+export function SetAgentSessionConfiguration(input: $models.SetAgentSessionConfigurationInput): $CancellablePromise<$models.MutationResult<application$0.SessionSummary>> {
+    return $Call.ByID(1100524509, input);
 }

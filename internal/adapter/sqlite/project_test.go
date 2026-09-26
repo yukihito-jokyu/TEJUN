@@ -375,7 +375,6 @@ func TestProjectCopyRevisionAndArchive(t *testing.T) {
 
 	for _, statement := range []string{
 		`UPDATE preparations SET purpose='目的',completion_criteria_json='["完了"]' WHERE project_id='source'`,
-		`INSERT INTO check_plans(project_id,revision) VALUES('source',1)`,
 		`INSERT INTO check_items(check_id,project_id,sequence,title,instruction,expected_result,ai_required,human_required,human_evidence_requirement) VALUES('check','source',1,'確認','実行','成功',1,1,'text')`,
 		`UPDATE projects SET status='completed',current_stage='completed',completed_at=1790384523000000 WHERE project_id='source'`,
 		`INSERT INTO procedures(procedure_id,project_id,revision,status,document_json,created_at,completed_at) VALUES('procedure','source',1,'completed','{}',1790384523000000,1790384523000000)`,

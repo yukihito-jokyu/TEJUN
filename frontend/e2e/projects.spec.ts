@@ -11,6 +11,7 @@ const method = {
   reconnect: 1544727671,
   prepareExport: 199265905,
   export: 4197448530,
+  preparation: 18778174,
 } as const;
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -139,6 +140,22 @@ async function mockProjects(
           total: matching.length,
           nextCursor: !input.cursor && matching.length > pageSize ? "next" : null,
           generatedAt: "2026-09-26T00:00:00Z",
+          changeSequence: sequence,
+        },
+      });
+    }
+    if (id === method.preparation) {
+      const item = saved.find((project) => project.projectId === input.projectId);
+      if (!item) return fail(route, "プロジェクトが見つかりません");
+      return route.fulfill({
+        json: {
+          project: item,
+          preparation: { purpose: "", completionCriteria: [], intendedUsers: "", revision: 1 },
+          checkPlan: { planId: item.projectId, revision: 1, items: [] },
+          session: null,
+          conversation: { items: [], hasPrevious: false },
+          elicitations: [],
+          readiness: { canStartExecution: false, blockingReasons: [] },
           changeSequence: sequence,
         },
       });
@@ -350,6 +367,7 @@ test("新規作成は失敗後に入力を保持し、同じ操作IDで再試行
   await expect(page.getByRole("textbox", { name: "手順書の名前" })).toHaveValue("新しい作業");
   await page.getByRole("button", { name: "準備工程へ進む" }).click();
   await expect(page).toHaveURL(/#\/projects\/new-5\/prepare$/);
+  await expect(page.getByText("新しい作業 / 準備")).toBeVisible();
   await page.goto("/#/projects");
   await expect(row(page, "新しい作業")).toBeVisible();
   const creates = calls.filter((call) => call.id === method.create);

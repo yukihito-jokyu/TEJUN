@@ -386,6 +386,14 @@ VALUES(?,?,?,?,?,?,'preparing','preparation',1,?,?)`,
 		return application.MutationResult[application.CreatedProject]{}, err
 	}
 
+	if _, err := tx.ExecContext(
+		ctx,
+		`INSERT INTO check_plans(project_id,revision) VALUES(?,1)`,
+		record.ProjectID,
+	); err != nil {
+		return application.MutationResult[application.CreatedProject]{}, err
+	}
+
 	result := createdProject(record.ProjectID, record.Receipt.CommittedAt, record.Receipt)
 	if err := finishProjectMutation(
 		ctx,
@@ -721,6 +729,18 @@ func (r *ProjectRepository) DeleteProject(
 		}
 	}
 
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM preparation_jobs WHERE session_id IN (SELECT session_id FROM preparation_sessions WHERE project_id=?) AND state IN ('pending','running')`, record.ProjectID).
+		Scan(&active); err != nil {
+		return application.MutationResult[application.DeletedProject]{}, err
+	}
+
+	if active > 0 {
+		return application.MutationResult[application.DeletedProject]{}, &shared.Error{
+			Code:    "active_job",
+			Message: "処理中のプロジェクトは削除できません",
+		}
+	}
+
 	rows, err := tx.QueryContext(
 		ctx,
 		`SELECT DISTINCT er.blob_hash FROM evidence_records er JOIN executions e ON e.execution_id=er.execution_id WHERE e.project_id=?`,
@@ -751,7 +771,14 @@ func (r *ProjectRepository) DeleteProject(
 		`DELETE FROM procedure_sources WHERE procedure_id IN (SELECT procedure_id FROM procedures WHERE project_id=?)`,
 		`DELETE FROM check_evidence WHERE check_id IN (SELECT check_id FROM check_items WHERE project_id=?)`,
 		`DELETE FROM evidence_records WHERE execution_id IN (SELECT execution_id FROM executions WHERE project_id=?)`,
+		`DELETE FROM execution_checks WHERE execution_id IN (SELECT execution_id FROM executions WHERE project_id=?)`,
 		`DELETE FROM executions WHERE project_id=?`,
+		`DELETE FROM elicitation_requests WHERE session_id IN (SELECT session_id FROM preparation_sessions WHERE project_id=?)`,
+		`DELETE FROM session_configuration_claims WHERE session_id IN (SELECT session_id FROM preparation_sessions WHERE project_id=?)`,
+		`DELETE FROM preparation_jobs WHERE session_id IN (SELECT session_id FROM preparation_sessions WHERE project_id=?)`,
+		`DELETE FROM preparation_messages WHERE session_id IN (SELECT session_id FROM preparation_sessions WHERE project_id=?)`,
+		`DELETE FROM preparation_turns WHERE session_id IN (SELECT session_id FROM preparation_sessions WHERE project_id=?)`,
+		`DELETE FROM preparation_sessions WHERE project_id=?`,
 		`DELETE FROM exports WHERE project_id=?`,
 		`DELETE FROM background_jobs WHERE project_id=?`,
 		`DELETE FROM acp_sessions WHERE project_id=?`,

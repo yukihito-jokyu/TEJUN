@@ -195,6 +195,105 @@ func TestFailedElicitationCanBeRetried(t *testing.T) {
 	}
 }
 
+func TestElicitationAnswerSchema(t *testing.T) {
+	cases := []struct {
+		name, mode, action, content string
+		expired                     bool
+		wantError                   bool
+	}{
+		{"valid form", "form", "accept", `{"answer":"yes"}`, false, false},
+		{"missing field", "form", "accept", `{}`, false, true},
+		{"wrong type", "form", "accept", `{"answer":1}`, false, true},
+		{"invalid JSON", "form", "accept", `{`, false, true},
+		{"url cannot accept form", "url", "accept", `{"answer":"yes"}`, false, true},
+		{"expired", "form", "decline", "", true, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+
+			db, err := Open(ctx, t.TempDir()+"/test.db")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			defer func() { _ = db.Close() }()
+
+			repo := NewAgentConnectionRepository(db)
+			now := time.Date(2026, 9, 26, 1, 2, 3, 0, time.UTC)
+
+			var expires *time.Time
+			if tc.expired {
+				expires = &now
+			}
+
+			if err := repo.RegisterElicitation(ctx, application.IncomingElicitation{
+				ID: "e", ConnectionAttemptID: "probe", ProcessGeneration: 1,
+				Mode: tc.mode, RequestedAt: now, ExpiresAt: expires,
+				RequestedSchema: map[string]any{
+					"type": "object", "required": []string{"answer"},
+					"properties": map[string]any{"answer": map[string]any{"type": "string"}},
+				},
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			_, _, err = repo.ClaimElicitation(ctx, application.ElicitationClaim{
+				ElicitationRequestID: "e", Action: tc.action, Content: tc.content,
+				OperationID: "op", RequestHash: "hash", ClaimedAt: now,
+				Receipt: application.MutationReceipt{OperationID: "op", CommittedAt: now},
+			})
+			if (err != nil) != tc.wantError {
+				t.Fatalf("error=%v, wantError=%v", err, tc.wantError)
+			}
+		})
+	}
+}
+
+func TestURLElicitationCompletionCorrelation(t *testing.T) {
+	cases := []struct {
+		name       string
+		attempt    string
+		generation int64
+		wantError  bool
+	}{
+		{"matching live process", "attempt", 4, false},
+		{"old process generation", "attempt", 3, true},
+		{"other attempt", "other", 4, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+
+			db, err := Open(ctx, t.TempDir()+"/test.db")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			defer func() { _ = db.Close() }()
+
+			repo := NewAgentConnectionRepository(db)
+
+			now := time.Date(2026, 9, 26, 1, 2, 3, 0, time.UTC)
+			if err := repo.RegisterElicitation(ctx, application.IncomingElicitation{
+				ID: "request", ElicitationID: "url-id", ConnectionAttemptID: "attempt",
+				ProcessGeneration: 4, Mode: "url", RequestedAt: now,
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			id, err := repo.CompleteURLElicitation(ctx, "url-id", tc.attempt, tc.generation, now)
+			if (err != nil) != tc.wantError {
+				t.Fatalf("error=%v, wantError=%v", err, tc.wantError)
+			}
+
+			if !tc.wantError && id != "request" {
+				t.Fatalf("request id=%q", id)
+			}
+		})
+	}
+}
+
 func TestRespondToElicitationIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 

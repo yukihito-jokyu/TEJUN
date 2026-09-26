@@ -25,10 +25,17 @@ type ElicitationResponder interface {
 
 type ElicitationSink interface {
 	RegisterElicitation(context.Context, IncomingElicitation) error
+	CompleteURLElicitation(context.Context, string, string, int64, time.Time) (string, error)
+	UpdateSessionConfiguration(context.Context, string, int64, *SessionModes, []SessionConfigOption, time.Time) error
 }
 
 type IncomingElicitation struct {
 	ID                  string
+	ElicitationID       string
+	SessionID           string
+	Scope               map[string]any
+	RequestedSchema     map[string]any
+	URL                 string
 	ConnectionAttemptID string
 	ProcessGeneration   int64
 	Mode                string
