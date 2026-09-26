@@ -16,8 +16,8 @@ import (
 type AgentConnectionRepository struct{ db *sql.DB }
 
 type PendingEvent struct {
-	ID, Name, EmittedAt, AggregateType, AggregateID, StreamKey, Correlation string
-	ChangeSequence, StreamRevision                                          int64
+	ID, Name, EmittedAt, AggregateType, AggregateID, StreamKey, Correlation, Payload, OperationID string
+	ChangeSequence, StreamRevision                                                                int64
 }
 
 func NewAgentConnectionRepository(db *sql.DB) *AgentConnectionRepository {
@@ -47,8 +47,11 @@ WHERE state = 'responding'`, completedAt.Format(time.RFC3339Nano)); err != nil {
 
 func (r *AgentConnectionRepository) PendingEvents(ctx context.Context) ([]PendingEvent, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT event_id, name, emitted_at, aggregate_type, aggregate_id,
-change_sequence, stream_key, stream_revision, correlation FROM event_outbox
-WHERE dispatched_at IS NULL ORDER BY emitted_at, event_id`)
+change_sequence, stream_key, stream_revision, correlation, payload_json,
+COALESCE((SELECT operation_id FROM operation_receipts WHERE
+json_extract(result_json,'$.Receipt.ChangeSequence')=event_outbox.change_sequence LIMIT 1),'')
+FROM event_outbox
+WHERE dispatched_at IS NULL ORDER BY change_sequence, event_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -58,8 +61,19 @@ WHERE dispatched_at IS NULL ORDER BY emitted_at, event_id`)
 
 	for rows.Next() {
 		var event PendingEvent
-		if err := rows.Scan(&event.ID, &event.Name, &event.EmittedAt, &event.AggregateType, &event.AggregateID,
-			&event.ChangeSequence, &event.StreamKey, &event.StreamRevision, &event.Correlation); err != nil {
+		if err := rows.Scan(
+			&event.ID,
+			&event.Name,
+			&event.EmittedAt,
+			&event.AggregateType,
+			&event.AggregateID,
+			&event.ChangeSequence,
+			&event.StreamKey,
+			&event.StreamRevision,
+			&event.Correlation,
+			&event.Payload,
+			&event.OperationID,
+		); err != nil {
 			return nil, err
 		}
 
@@ -542,10 +556,13 @@ func existingResult[T any](
 	operationID string,
 	requestHash string,
 ) (application.MutationResult[T], bool, error) {
-	var storedHash, resultJSON string
+	var (
+		storedHash, resultJSON string
+		storedVersion          int
+	)
 
-	err := tx.QueryRowContext(ctx, `SELECT request_hash, result_json FROM operation_receipts
-WHERE scope = ? AND operation_id = ?`, scope, operationID).Scan(&storedHash, &resultJSON)
+	err := tx.QueryRowContext(ctx, `SELECT request_hash, request_hash_version, result_json FROM operation_receipts
+WHERE scope = ? AND operation_id = ?`, scope, operationID).Scan(&storedHash, &storedVersion, &resultJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return application.MutationResult[T]{}, false, nil
 	}
@@ -554,7 +571,7 @@ WHERE scope = ? AND operation_id = ?`, scope, operationID).Scan(&storedHash, &re
 		return application.MutationResult[T]{}, false, err
 	}
 
-	if storedHash != requestHash {
+	if storedHash != requestHash || storedVersion != requestHashVersion(scope) {
 		return application.MutationResult[T]{}, false, &shared.Error{
 			Code: "operation_id_conflict", Message: "operationIdが別の入力で使用されています",
 		}
@@ -586,8 +603,8 @@ func saveMutation[T any](
 	if _, err := tx.ExecContext(
 		ctx,
 		`INSERT INTO operation_receipts
-(scope, operation_id, request_hash, result_json, committed_at) VALUES (?, ?, ?, ?, ?)`,
-		scope, operationID, requestHash, string(encoded),
+(scope, operation_id, request_hash, request_hash_version, result_json, committed_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		scope, operationID, requestHash, requestHashVersion(scope), string(encoded),
 		result.Receipt.CommittedAt.Format(time.RFC3339Nano),
 	); err != nil {
 		return err
@@ -596,13 +613,162 @@ func saveMutation[T any](
 	return insertOutbox(ctx, tx, event, sequence)
 }
 
+func requestHashVersion(scope string) int {
+	switch scope {
+	case "create_project",
+		"duplicate_project",
+		"create_revision",
+		"archive_project",
+		"delete_project",
+		"reconnect_project_session",
+		"export_procedure":
+		return 1
+	default:
+		return 0
+	}
+}
+
 func insertOutbox(ctx context.Context, tx *sql.Tx, event application.OutboxEvent, sequence int64) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO event_outbox
+	correlation, payload, err := eventData(ctx, tx, event)
+	if err != nil {
+		return err
+	}
+
+	correlationJSON, err := json.Marshal(correlation)
+	if err != nil {
+		return err
+	}
+
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.ExecContext(
+		ctx,
+		`INSERT INTO event_outbox
 (event_id, name, emitted_at, aggregate_type, aggregate_id, change_sequence, stream_key, stream_revision, correlation, payload_json)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '{}')`, event.ID, event.Name, event.EmittedAt.Format(time.RFC3339Nano), event.AggregateType,
-		event.AggregateID, sequence, event.AggregateType+":"+event.AggregateID, sequence, event.Correlation)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		event.ID,
+		event.Name,
+		event.EmittedAt.Format(time.RFC3339Nano),
+		event.AggregateType,
+		event.AggregateID,
+		sequence,
+		event.AggregateType+":"+event.AggregateID,
+		sequence,
+		string(correlationJSON),
+		string(payloadJSON),
+	)
 
 	return err
+}
+
+func eventData(ctx context.Context, tx *sql.Tx, event application.OutboxEvent) (map[string]string, any, error) {
+	correlation := map[string]string{}
+
+	switch event.Name {
+	case "project.deleted":
+		correlation["projectId"] = event.AggregateID
+		return correlation, map[string]any{"projectId": event.AggregateID, "deleted": true}, nil
+	case "project.changed":
+		var status, stage string
+		if err := tx.QueryRowContext(ctx, `SELECT status,current_stage FROM projects WHERE project_id=?`, event.AggregateID).
+			Scan(&status, &stage); err != nil {
+			return nil, nil, err
+		}
+
+		correlation["projectId"] = event.AggregateID
+
+		return correlation, struct {
+			ProjectID    string `json:"projectId"`
+			Status       string `json:"status"`
+			CurrentStage string `json:"currentStage"`
+		}{event.AggregateID, status, stage}, nil
+	case "session.connection_changed":
+		var (
+			projectID, sessionID, state string
+			jobID                       string
+		)
+		if event.Correlation != "" && event.AggregateID != "" {
+			jobID = event.Correlation
+		}
+
+		if err := tx.QueryRowContext(ctx, `SELECT project_id,session_id,state FROM acp_sessions WHERE session_id=? OR project_id=? ORDER BY created_at DESC LIMIT 1`, event.AggregateID, event.AggregateID).
+			Scan(&projectID, &sessionID, &state); err != nil {
+			return nil, nil, err
+		}
+
+		correlation["projectId"], correlation["sessionId"] = projectID, sessionID
+		if event.AggregateType == "session" && event.AggregateID == sessionID && jobID != "" {
+			correlation["jobId"] = jobID
+		}
+
+		return correlation, struct {
+			ProjectID string `json:"projectId"`
+			SessionID string `json:"sessionId"`
+			State     string `json:"state"`
+		}{projectID, sessionID, state}, nil
+	case "export.updated":
+		var (
+			exportID, procedureID, status, displayName string
+			errorCode                                  sql.NullString
+		)
+		if err := tx.QueryRowContext(ctx, `SELECT export_id,procedure_id,state,destination_display_name,error_code FROM exports WHERE export_id=? OR procedure_id=? ORDER BY accepted_at DESC LIMIT 1`, event.AggregateID, event.AggregateID).
+			Scan(&exportID, &procedureID, &status, &displayName, &errorCode); err != nil {
+			return nil, nil, err
+		}
+
+		correlation["procedureId"] = procedureID
+		if event.AggregateID == exportID && event.Correlation != "" {
+			correlation["jobId"] = event.Correlation
+		}
+
+		return correlation, struct {
+			ExportID               string `json:"exportId"`
+			Status                 string `json:"status"`
+			DestinationDisplayName string `json:"destinationDisplayName"`
+			ErrorSummary           string `json:"errorSummary,omitempty"`
+		}{exportID, status, displayName, errorCode.String}, nil
+	case "agent.connection.changed":
+		var state string
+		if err := tx.QueryRowContext(ctx, `SELECT auth_state FROM agent_connections WHERE connection_id=?`, event.AggregateID).
+			Scan(&state); err != nil {
+			return nil, nil, err
+		}
+
+		return correlation, struct {
+			ConnectionID string `json:"connectionId"`
+			AuthState    string `json:"authState"`
+		}{event.AggregateID, state}, nil
+	case "agent.authentication.updated":
+		var connectionID, state, jobID string
+		if err := tx.QueryRowContext(ctx, `SELECT target_id,state,job_id FROM agent_jobs WHERE job_id=? OR target_id=? ORDER BY accepted_at DESC LIMIT 1`, event.AggregateID, event.AggregateID).
+			Scan(&connectionID, &state, &jobID); err != nil {
+			return nil, nil, err
+		}
+
+		correlation["jobId"] = jobID
+
+		return correlation, struct {
+			ConnectionID string `json:"connectionId"`
+			AuthState    string `json:"authState"`
+			JobID        string `json:"jobId"`
+		}{connectionID, state, jobID}, nil
+	case "agent.elicitation.updated":
+		var state string
+		if err := tx.QueryRowContext(ctx, `SELECT state FROM elicitation_requests WHERE elicitation_request_id=?`, event.AggregateID).
+			Scan(&state); err != nil {
+			return nil, nil, err
+		}
+
+		return correlation, struct {
+			ElicitationRequestID string `json:"elicitationRequestId"`
+			Status               string `json:"status"`
+		}{event.AggregateID, state}, nil
+	default:
+		return correlation, map[string]string{}, nil
+	}
 }
 
 func getConnection(
