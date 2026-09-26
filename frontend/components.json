@@ -1,0 +1,24 @@
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "new-york",
+  "rsc": false,
+  "tsx": true,
+  "tailwind": {
+    "config": "",
+    "css": "src/app/styles.css",
+    "baseColor": "neutral",
+    "cssVariables": true,
+    "prefix": ""
+  },
+  "iconLibrary": "lucide",
+  "aliases": {
+    "components": "@/components",
+    "utils": "@/shared/lib/utils",
+    "ui": "@/components/ui",
+    "lib": "@/shared/lib",
+    "hooks": "@/shared/lib/hooks"
+  },
+  "registries": {
+    "@yukihi": "https://design.yukihi.tokyo/v1/r/{name}.json"
+  }
+}
