@@ -3,34 +3,6 @@
   background: var(--background);
   color: var(--foreground);
 }
-.first-run-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 4.5rem;
-  border-bottom: var(--ds-border-width-control) solid var(--border);
-  background: var(--surface);
-  padding-inline: max(var(--ds-space-6), calc((100vw - 68rem) / 2));
-}
-.setup-brand {
-  display: flex;
-  align-items: center;
-  gap: var(--ds-space-3);
-  font-weight: var(--ds-font-weight-semibold);
-}
-.setup-brand-mark {
-  display: grid;
-  width: 2rem;
-  height: 2rem;
-  place-items: center;
-}
-.setup-badge {
-  border: 1px solid var(--border-control);
-  border-radius: var(--ds-radius-pill);
-  padding: var(--ds-space-1) var(--ds-space-3);
-  color: var(--muted-foreground);
-  font-size: var(--ds-font-size-small);
-}
 .setup-shell {
   width: min(100% - 2 * var(--ds-space-6), 68rem);
   margin-inline: auto;
@@ -56,9 +28,6 @@
   text-transform: uppercase;
 }
 @media (max-width: 640px) {
-  .first-run-header {
-    padding-inline: var(--ds-space-4);
-  }
   .setup-shell {
     width: min(100% - 2 * var(--ds-space-4), 68rem);
     padding-block: var(--ds-space-8);

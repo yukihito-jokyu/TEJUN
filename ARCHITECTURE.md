@@ -129,4 +129,4 @@ React ComponentとReact Hookのファイル名はPascalCaseにする。Component
 
 ## 開発と検証
 
-`task dev`で開発起動し、`task storybook`で既存React UIを確認する。`task fmt`、`task lint`、`task test`、`task e2e`、`task build`を個別に実行でき、`task check`がBinding差分、静的検査、test、production build、Storybook静的build、E2Eをまとめる。Playwrightは自身が起動したViteのport 9245へ接続し、終了時に起動processを片付ける。Wailsとの統合はGo testとproduction buildで検証する。現在のbuild・CI対象はmacOSのみとする。
+`task dev`で開発起動し、データはこの作業ツリーの`.tejun-dev`へ分離する。明示的な`TEJUN_DATA_DIR`指定は優先する。`task storybook`で既存React UIを確認する。`task fmt`、`task lint`、`task test`、`task e2e`、`task build`を個別に実行でき、`task check`がBinding差分、静的検査、test、production build、Storybook静的build、E2Eをまとめる。Playwrightは自身が起動したViteのport 9245へ接続し、終了時に起動processを片付ける。Wailsとの統合はGo testとproduction buildで検証する。現在のbuild・CI対象はmacOSのみとする。

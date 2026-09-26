@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 
 import type { AgentConnectionInput } from "@/features/setup-connection/ui/SetupConnection";
 import { SetupPage } from "@/pages/setup/SetupPage";
+import { ProjectListPage } from "@/pages/projects/ProjectListPage";
 import {
   authenticateAgent,
   checkAuthentication,
@@ -10,6 +11,7 @@ import {
   getStartupState,
   listAgentCandidates,
   onAppEvent,
+  onSystemWake,
   parseAppError,
   type AgentCandidate,
   type AgentProbe,
@@ -79,7 +81,12 @@ export function App() {
         const startup = await getStartupState();
         if (generation !== startupSnapshot.current) return false;
         if (showSetup && !completionRoute.current) {
-          await navigate("/setup", { replace: true });
+          await navigate(
+            startup.initialSetupRequired ? "/setup" : startup.nextRoute.replace(/^#/, ""),
+            {
+              replace: true,
+            },
+          );
         }
         if (generation !== startupSnapshot.current) return false;
         if (showSetup || startup.initialSetupRequired) {
@@ -135,27 +142,45 @@ export function App() {
     loadStartup(true).catch(() => undefined);
   }, [loadStartup]);
 
-  useEffect(
-    () =>
-      onAppEvent((event) => {
-        loadStartup()
-          .then((current) => {
-            if (
-              current &&
-              event.aggregateType === "agent_job" &&
-              statusRef.current === "authenticating" &&
-              connectionRef.current &&
-              probeRef.current
-            ) {
-              completeConnection(connectionRef.current, probeRef.current.probeId).catch(
-                () => undefined,
-              );
-            }
-          })
-          .catch(() => undefined);
-      }),
-    [completeConnection, loadStartup],
-  );
+  useEffect(() => {
+    const unsubscribeEvent = onAppEvent(
+      (event) => {
+        const activeProbe = probeRef.current;
+        if (
+          event.name === "agent.authentication.updated" &&
+          event.aggregateType === "agent_job" &&
+          statusRef.current === "authenticating" &&
+          activeProbe &&
+          activeProbe.probeId === event.payload.connectionId
+        ) {
+          if (event.payload.authState === "succeeded" && connectionRef.current) {
+            statusRef.current = "saving";
+            completeConnection(connectionRef.current, activeProbe.probeId).catch(() => undefined);
+            return;
+          }
+          if (event.payload.authState === "failed") {
+            setStatus("ready");
+            setError({
+              code: "authentication_failed",
+              message: "認証に失敗しました。もう一度お試しください。",
+              retryable: true,
+            });
+            retry.current = () => {
+              if (connectionRef.current) runProbe(connectionRef.current).catch(() => undefined);
+            };
+            return;
+          }
+        }
+        loadStartup().catch(() => undefined);
+      },
+      () => void loadStartup(),
+    );
+    const unsubscribeWake = onSystemWake(() => void loadStartup());
+    return () => {
+      unsubscribeEvent();
+      unsubscribeWake();
+    };
+  }, [completeConnection, loadStartup, runProbe]);
 
   function refresh() {
     const generation = ++foregroundOperation.current;
@@ -204,21 +229,26 @@ export function App() {
               runProbe({ ...candidate, environmentOverrides: [] }).catch(() => undefined);
             }}
             onAuthenticate={authenticate}
-            onContinue={() => void navigate(nextRoute ?? "/projects", { replace: true })}
+            onContinue={() =>
+              void navigate((nextRoute ?? "/projects").replace(/^#/, ""), { replace: true })
+            }
             onRetry={() => retry.current()}
           />
         }
       />
-      <Route path="/projects" element={<ProjectsPlaceholder />} />
+      <Route path="/projects" element={<ProjectListPage />} />
+      <Route path="/projects/:projectId/*" element={<UnimplementedProjectStage />} />
       <Route path="*" element={<Navigate to="/setup" replace />} />
     </Routes>
   );
 }
 
-function ProjectsPlaceholder() {
+function UnimplementedProjectStage() {
   return (
-    <main aria-label="プロジェクト">
-      <h1>プロジェクト</h1>
+    <main aria-label="未実装の工程">
+      <h1>この工程はまだ利用できません</h1>
+      <p>プロジェクトは保存されています。一覧から作業を確認できます。</p>
+      <a href="#/projects">プロジェクト一覧へ戻る</a>
     </main>
   );
 }

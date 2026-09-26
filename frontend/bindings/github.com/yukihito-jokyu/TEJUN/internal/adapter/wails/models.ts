@@ -63,6 +63,18 @@ export interface AgentProbeResult {
     "capabilities"?: { [_ in string]?: boolean } | null;
 }
 
+export interface ArchiveProjectInput {
+    "projectId": string;
+    "expectedRevision": number;
+    "operationId": string;
+}
+
+export interface ArchivedProject {
+    "projectId": string;
+    "revision": number;
+    "archivedAt": string;
+}
+
 export interface AuthMethodView {
     "type": string;
     "authMethodId": string;
@@ -97,6 +109,51 @@ export interface CompleteSetupInput {
     "operationId": string;
 }
 
+export interface CreateProjectInput {
+    "name": string;
+    "description": string;
+    "workspacePath": string;
+    "connectionId": string;
+    "operationId": string;
+}
+
+export interface CreateRevisionInput {
+    "sourceProjectId": string;
+    "sourceProcedureId": string;
+    "sourceProcedureRevision": number;
+    "name": string;
+    "workspacePath": string;
+    "operationId": string;
+}
+
+export interface CreatedProject {
+    "projectId": string;
+    "revision": number;
+    "status": string;
+    "currentStage": string;
+    "nextRoute": string;
+    "createdAt": string;
+}
+
+export interface DeleteProjectInput {
+    "projectId": string;
+    "expectedRevision": number;
+    "operationId": string;
+}
+
+export interface DeletedProject {
+    "projectId": string;
+    "deletedAt": string;
+}
+
+export interface DuplicateProjectInput {
+    "sourceProjectId": string;
+    "sourceRevision": number;
+    "name": string;
+    "workspacePath": string;
+    "operationId": string;
+}
+
 export interface ElicitationResponseResult {
     "elicitationRequestId": string;
     "status": string;
@@ -106,6 +163,25 @@ export interface ElicitationResponseResult {
 export interface EnvironmentVariableInput {
     "name": string;
     "value": string;
+}
+
+export interface ExportAccepted {
+    "exportId": string;
+    "jobId": string;
+    "procedureId": string;
+    "format": string;
+    "destinationDisplayName": string;
+    "acceptedAt": string;
+}
+
+export interface ExportProcedureInput {
+    "procedureId": string;
+    "procedureRevision": number;
+    "format": string;
+    "destination": VerifiedPathSelection;
+    "overwriteConfirmed": boolean;
+    "overwriteIdentity": OverwriteIdentity | null;
+    "operationId": string;
 }
 
 export interface InitialSetupResult {
@@ -129,11 +205,80 @@ export interface LogoutAgentInput {
 export interface MutationReceipt {
     "operationId": string;
     "committedAt": string;
+    "changeSequence": number;
 }
 
 export interface MutationResult<T> {
     "data": T;
     "receipt": MutationReceipt;
+}
+
+export interface OverwriteIdentity {
+    "size": number;
+    "sha256": string;
+    "device": number;
+    "inode": number;
+}
+
+export interface PrepareExportProcedureInput {
+    "procedureId": string;
+    "procedureRevision": number;
+    "absolutePath": string;
+}
+
+export interface PreparedExportProcedure {
+    "destination": VerifiedPathSelection;
+    "overwriteIdentity": OverwriteIdentity | null;
+    "destinationDisplayName": string;
+    "overwriteRequired": boolean;
+}
+
+export interface ProjectListQuery {
+    "search": string;
+    "statuses": string[] | null;
+    "sort": string;
+    "cursor"?: string;
+    "limit": number;
+}
+
+export interface ProjectListResult {
+    "items": ProjectSummary[] | null;
+    "total": number;
+    "nextCursor": string | null;
+    "generatedAt": string;
+    "changeSequence": number;
+}
+
+export interface ProjectProgress {
+    "completed": number;
+    "total": number;
+}
+
+export interface ProjectSummary {
+    "projectId": string;
+    "name": string;
+    "description": string;
+    "workspacePath": string;
+    "status": string;
+    "currentStage": string;
+    "progress": ProjectProgress;
+    "attentionRank": number;
+    "attentionReason": string | null;
+    "updatedAt": string;
+    "completedAt": string | null;
+    "resumeRoute": string;
+    "currentProcedureId": string | null;
+    "currentProcedureRevision"?: number | null;
+    "connectionState": string;
+    "errorSummary": string | null;
+    "revision": number;
+}
+
+export interface ReconnectSessionInput {
+    "projectId": string;
+    "expectedRevision": number;
+    "strategy": string;
+    "operationId": string;
 }
 
 export interface RespondToElicitationInput {
@@ -143,10 +288,25 @@ export interface RespondToElicitationInput {
     "operationId": string;
 }
 
+export interface SessionConnectionAccepted {
+    "projectId": string;
+    "sessionId": string;
+    "jobId": string;
+    "state": string;
+    "recoveryMode": string;
+    "acceptedAt": string;
+}
+
 export interface StartupState {
     "initialSetupRequired": boolean;
     "defaultConnection"?: AgentConnectionSummary | null;
     "recoveryNotice"?: string;
     "nextRoute": string;
     "changeSequence": number;
+}
+
+export interface VerifiedPathSelection {
+    "absolutePath": string;
+    "resolvedPath": string;
+    "verifiedRootId": string;
 }

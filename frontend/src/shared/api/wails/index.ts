@@ -1,4 +1,8 @@
 import { Events } from "@wailsio/runtime";
+import Ajv2020 from "ajv/dist/2020";
+import addFormats from "ajv-formats";
+
+import appEventSchema from "../../../../../internal/adapter/wails/events/app_event.schema.json";
 
 import {
   AgentControlService,
@@ -9,6 +13,21 @@ import {
 } from "../../../../bindings/github.com/yukihito-jokyu/TEJUN/internal/adapter/wails";
 
 export { parseAppError, type AppErrorCause } from "./errors";
+export {
+  archiveProject,
+  createProject,
+  createRevision,
+  deleteProject,
+  chooseExportDestination,
+  chooseWorkspaceDirectory,
+  duplicateProject,
+  exportProcedure,
+  listProjects,
+  reconnectProject,
+  type ProjectFilter,
+  type ProjectSummary,
+  type PreparedExportProcedure,
+} from "./projects";
 
 export type AgentConnectionInput = {
   displayName: string;
@@ -43,7 +62,16 @@ export type AgentProbe = {
 };
 
 export type AppEvent = {
+  eventId: string;
+  name: string;
+  emittedAt: string;
   aggregateType: string;
+  aggregateId: string;
+  changeSequence: number;
+  streamKey: string;
+  streamRevision: number;
+  correlation: Record<string, string>;
+  payload: Record<string, unknown>;
 };
 
 export async function getStartupState() {
@@ -112,8 +140,42 @@ export function respondToElicitation(
   });
 }
 
-export function onAppEvent(callback: (event: AppEvent) => void) {
-  return Events.On("app:event", (event) => callback(event.data));
+export function onAppEvent(callback: (event: AppEvent) => void, onInvalid?: () => void) {
+  return Events.On("app:event", (event) => {
+    const value: unknown = event.data;
+    if (isAppEvent(value)) callback(value);
+    else {
+      onInvalid?.();
+      const causeId = crypto.randomUUID();
+      const payload =
+        value && typeof value === "object" ? (value as Record<string, unknown>).payload : null;
+      if (!crypto.subtle) {
+        console.warn("不正なAppEvent", { causeId, payloadDigest: "unavailable" });
+        return;
+      }
+      void crypto.subtle
+        .digest("SHA-256", new TextEncoder().encode(JSON.stringify(payload)))
+        .then((digest) =>
+          console.warn("不正なAppEvent", {
+            causeId,
+            payloadDigest: Array.from(new Uint8Array(digest), (byte) =>
+              byte.toString(16).padStart(2, "0"),
+            ).join(""),
+          }),
+        )
+        .catch(() => console.warn("不正なAppEvent", { causeId, payloadDigest: "unavailable" }));
+    }
+  });
+}
+
+export function onSystemWake(callback: () => void) {
+  return Events.On("common:SystemDidWake", callback);
+}
+
+const validateAppEvent = addFormats(new Ajv2020()).compile(appEventSchema);
+
+function isAppEvent(value: unknown): value is AppEvent {
+  return validateAppEvent(value) as boolean;
 }
 
 export function nonNull<T>(items: T[] | null | undefined): T[] {

@@ -35,17 +35,18 @@ var (
 )
 
 type Manager struct {
-	checkMu      sync.Mutex
-	mu           sync.Mutex
-	sessions     map[string]*session
-	checks       map[string]probeCheck
-	elicitations map[string]chan application.ElicitationResponse
-	sink         application.ElicitationSink
-	now          func() time.Time
-	newID        func() string
-	generation   atomic.Int64
-	lifecycle    context.Context
-	cancel       context.CancelFunc
+	checkMu         sync.Mutex
+	mu              sync.Mutex
+	sessions        map[string]*session
+	checks          map[string]probeCheck
+	projectSessions map[string]*projectSession
+	elicitations    map[string]chan application.ElicitationResponse
+	sink            application.ElicitationSink
+	now             func() time.Time
+	newID           func() string
+	generation      atomic.Int64
+	lifecycle       context.Context
+	cancel          context.CancelFunc
 }
 
 type probeCheck struct {
@@ -72,8 +73,9 @@ func NewManager(sink application.ElicitationSink, now func() time.Time, newID fu
 
 	return &Manager{
 		sessions: make(map[string]*session), checks: make(map[string]probeCheck),
-		elicitations: make(map[string]chan application.ElicitationResponse),
-		sink:         sink, now: now, newID: newID, lifecycle: lifecycle, cancel: cancel,
+		projectSessions: make(map[string]*projectSession),
+		elicitations:    make(map[string]chan application.ElicitationResponse),
+		sink:            sink, now: now, newID: newID, lifecycle: lifecycle, cancel: cancel,
 	}
 }
 
@@ -393,11 +395,18 @@ func (m *Manager) Close() error {
 	for id := range m.sessions {
 		ids = append(ids, id)
 	}
+
+	projectSessions := m.projectSessions
+	m.projectSessions = make(map[string]*projectSession)
 	m.mu.Unlock()
 
 	var err error
 	for _, id := range ids {
 		err = errors.Join(err, m.closeSession(id))
+	}
+
+	for _, session := range projectSessions {
+		err = errors.Join(err, session.process.close())
 	}
 
 	return err

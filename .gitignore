@@ -17,3 +17,4 @@ frontend/test-results/
 frontend/storybook-static/
 frontend/tsconfig.tsbuildinfo
 /.codex/ponytail-state/
+/.tejun-dev/

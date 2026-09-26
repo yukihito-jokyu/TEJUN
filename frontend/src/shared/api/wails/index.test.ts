@@ -1,9 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { Call } from "@wailsio/runtime";
+import { Call, Events } from "@wailsio/runtime";
 
 import { StartupService } from "../../../../bindings/github.com/yukihito-jokyu/TEJUN/internal/adapter/wails";
 
-import { checkAuthentication, listAgentCandidates, nonNull, parseAppError } from ".";
+import {
+  checkAuthentication,
+  listAgentCandidates,
+  nonNull,
+  onAppEvent,
+  onSystemWake,
+  parseAppError,
+} from ".";
+
+vi.mock("@wailsio/runtime", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@wailsio/runtime")>();
+  return { ...actual, Events: { ...actual.Events, On: vi.fn(() => vi.fn()) } };
+});
 
 vi.mock("../../../../bindings/github.com/yukihito-jokyu/TEJUN/internal/adapter/wails", () => ({
   AgentControlService: {},
@@ -97,4 +109,92 @@ describe("Wails DTO", () => {
       ),
     ).resolves.toEqual({ probeId: "probe-1", authState: "not_required", authMethods: [] });
   });
+});
+
+it("不正Eventをreducerへ渡さず、診断とsnapshot再取得へ切り替える", async () => {
+  let receive: (event: { data: unknown }) => void = () => undefined;
+  vi.mocked(Events.On).mockImplementation((_name, callback) => {
+    receive = callback as typeof receive;
+    return vi.fn();
+  });
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  const valid = vi.fn();
+  const invalid = vi.fn();
+  onAppEvent(valid, invalid);
+  receive({ data: { eventId: "bad", payload: { secret: "do not log" } } });
+  expect(valid).not.toHaveBeenCalled();
+  expect(invalid).toHaveBeenCalledOnce();
+  await vi.waitFor(() => expect(warning).toHaveBeenCalledOnce());
+  expect(JSON.stringify(warning.mock.calls)).not.toContain("do not log");
+  warning.mockRestore();
+});
+
+it("schemaに合うEventだけを購読先へ渡す", () => {
+  let receive: (event: { data: unknown }) => void = () => undefined;
+  vi.mocked(Events.On).mockImplementation((_name, callback) => {
+    receive = callback as typeof receive;
+    return vi.fn();
+  });
+  const valid = vi.fn();
+  const invalid = vi.fn();
+  onAppEvent(valid, invalid);
+  receive({
+    data: {
+      eventId: "e1",
+      name: "project.changed",
+      emittedAt: "2026-09-26T00:00:00Z",
+      aggregateType: "project",
+      aggregateId: "one",
+      changeSequence: 1,
+      streamKey: "project:one",
+      streamRevision: 0,
+      correlation: {},
+      payload: {},
+    },
+  });
+  expect(valid).toHaveBeenCalledOnce();
+  expect(invalid).not.toHaveBeenCalled();
+});
+
+it.each([
+  { name: "欠落", change: (event: Record<string, unknown>) => delete event.eventId },
+  { name: "型違い", change: (event: Record<string, unknown>) => (event.changeSequence = "1") },
+  { name: "未知field", change: (event: Record<string, unknown>) => (event.secret = "hidden") },
+  {
+    name: "改変",
+    change: (event: Record<string, unknown>) => (event.correlation = { projectId: 1 }),
+  },
+])("$nameのEventを棄却する", ({ change }) => {
+  let receive: (event: { data: unknown }) => void = () => undefined;
+  vi.mocked(Events.On).mockImplementation((_name, callback) => {
+    receive = callback as typeof receive;
+    return vi.fn();
+  });
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  const valid = vi.fn();
+  const invalid = vi.fn();
+  const event: Record<string, unknown> = {
+    eventId: "e1",
+    name: "project.changed",
+    emittedAt: "2026-09-26T00:00:00Z",
+    aggregateType: "project",
+    aggregateId: "one",
+    changeSequence: 1,
+    streamKey: "project:one",
+    streamRevision: 0,
+    correlation: {},
+    payload: { secret: "do not log" },
+  };
+  change(event);
+  onAppEvent(valid, invalid);
+  receive({ data: event });
+  expect(valid).not.toHaveBeenCalled();
+  expect(invalid).toHaveBeenCalledOnce();
+  warning.mockRestore();
+});
+
+it("system wakeを共通Wails Eventから購読する", () => {
+  const callback = vi.fn();
+  onSystemWake(callback);
+  expect(Events.On).toHaveBeenCalledWith("common:SystemDidWake", callback);
 });

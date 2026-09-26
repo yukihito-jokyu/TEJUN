@@ -46,8 +46,8 @@ func TestOpenAppliesMigrationsAndPragmas(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if version != 2 {
-				t.Fatalf("version=%d, want 2", version)
+			if version != 5 {
+				t.Fatalf("version=%d, want 5", version)
 			}
 
 			assertPragmasOnTwoConnections(t, db)

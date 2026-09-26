@@ -310,6 +310,10 @@ func TestFakeACPProcess(t *testing.T) {
 			}
 		}
 
+		if request.Method == "session/new" && os.Getenv("FAKE_ACP_MODE") == "session_timeout" {
+			continue
+		}
+
 		if err := encoder.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result}); err != nil {
 			os.Exit(3)
 		}

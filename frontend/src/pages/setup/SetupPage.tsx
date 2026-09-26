@@ -1,7 +1,7 @@
-import { FoldWelcomeCharacterIcon } from "@/components/icons/FoldWelcomeCharacterIcon";
 import { LoadingState } from "@/components/patterns/LoadingState";
 import type { SetupConnectionProps } from "@/features/setup-connection/ui/SetupConnection";
 import { SetupConnection } from "@/features/setup-connection/ui/SetupConnection";
+import { AppHeader } from "@/widgets/app-header/AppHeader";
 import "./SetupPage.css";
 
 export type SetupPageProps = SetupConnectionProps & { loading?: boolean };
@@ -9,15 +9,7 @@ export type SetupPageProps = SetupConnectionProps & { loading?: boolean };
 export function SetupPage({ loading = false, ...props }: SetupPageProps) {
   return (
     <main className="setup-page" aria-labelledby="setup-title">
-      <header className="first-run-header">
-        <div className="setup-brand">
-          <span className="setup-brand-mark" aria-hidden="true">
-            <FoldWelcomeCharacterIcon size={32} />
-          </span>
-          <span>TEJUN</span>
-        </div>
-        <span className="setup-badge">初回セットアップ</span>
-      </header>
+      <AppHeader title="TEJUN" badge="初回セットアップ" />
       <div className="setup-shell">
         <div className="setup-heading">
           <p className="setup-eyebrow">Agent Client Protocol</p>

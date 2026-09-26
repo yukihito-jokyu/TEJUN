@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tejun.local/schemas/app-event.schema.json",
+  "type": "object",
+  "required": ["eventId", "name", "emittedAt", "aggregateType", "aggregateId", "changeSequence", "streamKey", "streamRevision", "correlation", "payload"],
+  "additionalProperties": false,
+  "properties": {
+    "eventId": { "type": "string", "minLength": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "emittedAt": { "type": "string", "format": "date-time" },
+    "aggregateType": { "type": "string", "minLength": 1 },
+    "aggregateId": { "type": "string", "minLength": 1 },
+    "changeSequence": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+    "streamKey": { "type": "string", "minLength": 3 },
+    "streamRevision": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+    "correlation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectId": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "turnId": { "type": "string" },
+        "executionId": { "type": "string" },
+        "runId": { "type": "string" },
+        "procedureId": { "type": "string" },
+        "jobId": { "type": "string" }
+      }
+    },
+    "payload": { "type": "object" }
+  }
+}

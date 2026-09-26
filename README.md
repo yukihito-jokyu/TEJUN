@@ -16,4 +16,4 @@ npx --prefix frontend playwright install chromium
 task dev
 ```
 
-`task dev`はWailsアプリとVite開発サーバー、`task storybook`は既存React UIを確認するStorybookを起動する。全検査は`task check`、macOS向けPlaywright smoke testは`task e2e`、productionバイナリ生成は`task build`で実行する。`task check`にはStorybookの静的buildも含む。生成物は`bin/tejun`へ配置する。配置と依存方向は[ARCHITECTURE.md](./ARCHITECTURE.md)を参照する。
+`task dev`はこの作業ツリーの`.tejun-dev`をデータ領域としてWailsアプリとVite開発サーバーを起動する。既存データ領域を使う場合は`TEJUN_DATA_DIR`で明示的に上書きできる。`task storybook`は既存React UIを確認するStorybookを起動する。全検査は`task check`、macOS向けPlaywright smoke testは`task e2e`、productionバイナリ生成は`task build`で実行する。`task check`にはStorybookの静的buildも含む。生成物は`bin/tejun`へ配置する。配置と依存方向は[ARCHITECTURE.md](./ARCHITECTURE.md)を参照する。

@@ -8,6 +8,7 @@ const methods = {
   logout: 870717045,
   startup: 2958778619,
   candidates: 748173126,
+  projects: 2753046913,
 } as const;
 
 type FailureMode = "incompatible" | "timeout" | "exit" | "cancelled";
@@ -68,6 +69,17 @@ async function mockWails(page: Page, mode: Mode) {
           initialSetupRequired: !configured,
           nextRoute: configured ? "/projects" : "/setup",
           defaultConnection: null,
+        },
+      });
+    }
+    if (method === methods.projects) {
+      return route.fulfill({
+        json: {
+          items: [],
+          total: 0,
+          nextCursor: null,
+          generatedAt: "2026-09-26T00:00:00Z",
+          changeSequence: 1,
         },
       });
     }
@@ -189,14 +201,14 @@ async function selectAndProbe(page: Page) {
   await page.getByRole("button", { name: "接続" }).click();
 }
 
-test("認証不要Agentを保存し、再起動時は接続画面から始める", async ({ page }) => {
+test("認証不要Agentを保存し、再起動時はプロジェクト一覧から始める", async ({ page }) => {
   await mockWails(page, "noauth");
   await selectAndProbe(page);
   await expect(page.getByText("エージェントを接続しました")).toBeVisible();
   await page.getByRole("button", { name: /プロジェクト一覧へ/ }).click();
   await expect(page).toHaveURL(/#\/projects$/);
   await page.reload();
-  await expect(page.getByRole("heading", { name: "AIエージェントを接続" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "すべてのプロジェクト" })).toBeVisible();
   await page.evaluate(async (source) => {
     const api = (await import(source)) as {
       logoutAgent: (connectionId: string, operationId: string) => Promise<unknown>;
@@ -225,10 +237,26 @@ for (const mode of ["agent", "terminal"] as const) {
       const runtime = window as Window & {
         _wails?: { dispatchWailsEvent?: (event: { name: string; data: unknown }) => void };
       };
-      runtime._wails?.dispatchWailsEvent?.({
-        name: "app:event",
-        data: { aggregateType: "agent_job" },
-      });
+      for (const [aggregateType, aggregateId, authState] of [
+        ["agent_job", "job-1", "succeeded"],
+        ["agent_connection", "probe-1", "pending"],
+      ]) {
+        runtime._wails?.dispatchWailsEvent?.({
+          name: "app:event",
+          data: {
+            eventId: crypto.randomUUID(),
+            name: "agent.authentication.updated",
+            emittedAt: new Date().toISOString(),
+            aggregateType,
+            aggregateId,
+            changeSequence: 1,
+            streamKey: `${aggregateType}:${aggregateId}`,
+            streamRevision: 1,
+            correlation: { jobId: "job-1" },
+            payload: { connectionId: "probe-1", authState, jobId: "job-1" },
+          },
+        });
+      }
     });
     await expect(page.getByText("エージェントを接続しました")).toBeVisible();
     await page.getByRole("button", { name: /プロジェクト一覧へ/ }).click();

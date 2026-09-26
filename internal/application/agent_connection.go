@@ -154,8 +154,9 @@ func (s *Startup) CompleteInitialSetup(
 }
 
 type MutationReceipt struct {
-	OperationID string
-	CommittedAt time.Time
+	OperationID    string
+	CommittedAt    time.Time
+	ChangeSequence int64
 }
 
 type MutationResult[T any] struct {
