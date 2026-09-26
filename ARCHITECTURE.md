@@ -105,7 +105,7 @@ Wails呼出しを行うHook、データ取得、mutation、フォームや操作
 | React unit test | 対象ファイルの隣の`*.test.ts`または`*.test.tsx` | VitestとTesting Libraryで表示、操作、境界変換を検証する |
 | Storybook story | 対象Componentの隣の`*.stories.tsx` | 既存UIの代表状態だけを置き、検証専用のサンプルUIを作らない |
 | architecture test | リポジトリrootの`architecture_test.go` | package間の禁止依存を検査する |
-| Wails E2E | `frontend/e2e/*.spec.ts` | Wails開発起動を使い、利用者に観測できる結果を検証する |
+| Frontend E2E | `frontend/e2e/*.spec.ts` | Vite開発サーバーを使い、利用者に観測できる結果を検証する |
 
 E2Eの共通fixtureやhelperは、複数specで同じ責務を共有する時点で`frontend/e2e`直下へ追加する。Issue番号、成功・失敗、URLごとのディレクトリは作らない。
 
@@ -129,4 +129,4 @@ React ComponentとReact Hookのファイル名はPascalCaseにする。Component
 
 ## 開発と検証
 
-`task dev`で開発起動し、`task storybook`で既存React UIを確認する。`task fmt`、`task lint`、`task test`、`task e2e`、`task build`を個別に実行でき、`task check`がBinding差分、静的検査、test、production build、Storybook静的build、E2Eをまとめる。PlaywrightはWails開発起動が提供するport 9245へ接続し、終了時に起動processを片付ける。現在のbuild・CI対象はmacOSのみとする。
+`task dev`で開発起動し、`task storybook`で既存React UIを確認する。`task fmt`、`task lint`、`task test`、`task e2e`、`task build`を個別に実行でき、`task check`がBinding差分、静的検査、test、production build、Storybook静的build、E2Eをまとめる。Playwrightは自身が起動したViteのport 9245へ接続し、終了時に起動processを片付ける。Wailsとの統合はGo testとproduction buildで検証する。現在のbuild・CI対象はmacOSのみとする。

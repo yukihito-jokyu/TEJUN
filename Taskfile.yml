@@ -76,7 +76,7 @@ tasks:
       - npm --prefix frontend run test
 
   e2e:
-    desc: Wails開発起動で最小Playwright smoke testを実行する
+    desc: Vite開発サーバーで最小Playwright smoke testを実行する
     deps: [check-tools]
     cmds:
       - npm --prefix frontend run test:e2e

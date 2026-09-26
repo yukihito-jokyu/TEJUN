@@ -1,7 +1,6 @@
 #!/bin/sh
 set -eu
 
-data_dir=$(mktemp -d "${TMPDIR:-/tmp}/tejun-e2e.XXXXXX")
 child_pid=""
 
 terminate_tree() {
@@ -17,10 +16,9 @@ cleanup() {
     terminate_tree "$child_pid"
     wait "$child_pid" 2>/dev/null || true
   fi
-  rm -rf -- "$data_dir"
 }
 
 trap cleanup EXIT INT TERM
-TEJUN_DATA_DIR="$data_dir" task --dir .. dev &
+npm run dev -- --host 127.0.0.1 --port 9245 --strictPort &
 child_pid=$!
 wait "$child_pid"

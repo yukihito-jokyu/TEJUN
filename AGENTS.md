@@ -53,7 +53,7 @@
 | `task test` | Go race testとFrontend unit test |
 | `task bindings:check` | Wails Bindingの再生成差分と追跡漏れ |
 | `task build` | FrontendとmacOS用Wails binary |
-| `task e2e` | Wails開発起動を使うPlaywright |
+| `task e2e` | Vite開発サーバーを使うPlaywright |
 | `task check` | 上記のうち自動検証対象を一括実行 |
 
 実行していない検証、warning、残作業がある場合は完了報告で明示する。
