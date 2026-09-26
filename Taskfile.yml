@@ -31,7 +31,7 @@ tasks:
     desc: Wailsアプリを開発モードで起動する
     deps: [check-tools]
     cmds:
-      - go tool wails3 dev -config ./build/config.yml -port 9245
+      - TEJUN_DATA_DIR="${TEJUN_DATA_DIR:-{{.TASKFILE_DIR}}/.tejun-dev}" go tool wails3 dev -config ./build/config.yml -port 9245
 
   bindings:
     desc: GoからTypeScript Bindingを生成する
