@@ -1,0 +1,50 @@
+.project-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-2);
+}
+
+.project-path-input {
+  display: flex;
+  gap: var(--ds-space-2);
+}
+.project-path-input input {
+  min-width: 0;
+  flex: 1;
+}
+.project-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--ds-z-index-modal);
+  display: grid;
+  place-items: center;
+  padding: var(--ds-space-4);
+  background: var(--overlay);
+}
+.project-action {
+  position: fixed;
+  z-index: var(--ds-z-index-modal);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: grid;
+  gap: var(--ds-space-3);
+  width: min(100%, 32rem);
+  max-height: 90dvh;
+  overflow: auto;
+  padding: var(--ds-space-6);
+  border-radius: var(--ds-radius-xl);
+  background: var(--surface);
+  box-shadow: var(--ds-shadow-dialog);
+}
+.project-action h2 {
+  margin: 0;
+}
+.project-action-buttons {
+  justify-content: flex-end;
+  margin-top: var(--ds-space-4);
+}
+.project-action-error {
+  color: var(--destructive);
+}

@@ -1,0 +1,33 @@
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 4.5rem;
+  border-bottom: var(--ds-border-width-control) solid var(--border);
+  background: var(--surface);
+  padding-inline: max(var(--ds-space-6), calc((100vw - 68rem) / 2));
+}
+.app-header-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-3);
+  font-weight: var(--ds-font-weight-semibold);
+}
+.app-header-mark {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+}
+.app-header-badge {
+  border: 1px solid var(--border-control);
+  border-radius: var(--ds-radius-pill);
+  padding: var(--ds-space-1) var(--ds-space-3);
+  color: var(--muted-foreground);
+  font-size: var(--ds-font-size-small);
+}
+@media (max-width: 640px) {
+  .app-header {
+    padding-inline: var(--ds-space-4);
+  }
+}
