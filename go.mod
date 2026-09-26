@@ -5,7 +5,10 @@ go 1.26.6
 require (
 	github.com/coder/acp-go-sdk v0.13.5
 	github.com/pressly/goose/v3 v3.26.0
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
+	github.com/signintech/gopdf v0.38.1
 	github.com/wailsapp/wails/v3 v3.0.0-beta.25
+	golang.org/x/sys v0.46.0
 	modernc.org/sqlite v1.47.0
 )
 
@@ -113,6 +116,7 @@ require (
 	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 // indirect
+	github.com/phpdave11/gofpdi v1.0.14-0.20211212211723-1f10f9844311 // indirect
 	github.com/pjbgf/sha1cd v0.6.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pterm/pterm v0.12.82 // indirect
@@ -150,7 +154,6 @@ require (
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/term v0.44.0 // indirect
 	golang.org/x/text v0.39.0 // indirect
 	golang.org/x/tools v0.47.0 // indirect
