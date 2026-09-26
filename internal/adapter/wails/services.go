@@ -12,7 +12,6 @@ import (
 
 type (
 	StartupService      struct{ startup *application.Startup }
-	ProjectService      struct{}
 	PreparationService  struct{}
 	ExecutionService    struct{}
 	ProcedureService    struct{}
@@ -141,8 +140,9 @@ type AgentProbeResult struct {
 }
 
 type MutationReceipt struct {
-	OperationID string `json:"operationId"`
-	CommittedAt string `json:"committedAt"`
+	OperationID    string `json:"operationId"`
+	CommittedAt    string `json:"committedAt"`
+	ChangeSequence int64  `json:"changeSequence"`
 }
 
 type MutationResult[T any] struct {
@@ -507,7 +507,11 @@ func connectionSummary(connection agentconnection.Connection) AgentConnectionSum
 }
 
 func receipt(value application.MutationReceipt) MutationReceipt {
-	return MutationReceipt{OperationID: value.OperationID, CommittedAt: value.CommittedAt.Format(time.RFC3339Nano)}
+	return MutationReceipt{
+		OperationID:    value.OperationID,
+		CommittedAt:    value.CommittedAt.Format(time.RFC3339Nano),
+		ChangeSequence: value.ChangeSequence,
+	}
 }
 
 func jobResult(result application.MutationResult[application.AgentJobAccepted]) MutationResult[AgentJobAccepted] {
