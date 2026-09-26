@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -108,6 +109,272 @@ func TestFingerprintDoesNotExposeSecret(t *testing.T) {
 	got := manager.Fingerprint(input)
 	if got == "" || got == "top-secret" {
 		t.Fatalf("unexpected fingerprint %q", got)
+	}
+}
+
+func TestPreparationACPJob(t *testing.T) {
+	manager := NewManager(nil, time.Now, func() string { return "generated-id" })
+	defer func() { _ = manager.Close() }()
+
+	connection := agentconnection.ConnectionInput{
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestFakeACPProcess"},
+		EnvironmentOverrides: []agentconnection.EnvironmentVariable{
+			{Name: "GO_WANT_FAKE_ACP", Value: "1"},
+			{Name: "FAKE_ACP_MODE", Value: "noauth"},
+		},
+	}
+
+	workspace, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	jobs := []struct {
+		name string
+		job  application.ClaimedPreparationJob
+		want string
+	}{
+		{
+			name: "connect",
+			job: application.ClaimedPreparationJob{
+				Kind:          "connect",
+				JobID:         "connect-job",
+				SessionID:     "app-session",
+				WorkspacePath: workspace,
+				Connection:    connection,
+			},
+			want: "agent-session",
+		},
+		{
+			name: "turn",
+			job: application.ClaimedPreparationJob{
+				Kind:      "turn",
+				JobID:     "turn-job",
+				SessionID: "app-session",
+				TurnID:    "turn",
+				Content:   []application.ContentPart{{Type: "text", Text: "hello"}},
+			},
+			want: "end_turn",
+		},
+	}
+	for _, tt := range jobs {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := manager.ExecutePreparation(context.Background(), tt.job)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if tt.name == "connect" && result.AgentSessionID != tt.want {
+				t.Fatalf("agent session = %q", result.AgentSessionID)
+			}
+
+			if tt.name == "turn" &&
+				(result.StopReason != tt.want || len(result.Messages) != 1 || result.Messages[0].Content[0].Text != "reply") {
+				t.Fatalf("turn result = %+v", result)
+			}
+		})
+	}
+
+	changed, err := manager.SetConfiguration(
+		context.Background(),
+		application.SessionConfigurationTarget{
+			SessionID:      "app-session",
+			AgentSessionID: "agent-session",
+			Change:         application.SessionConfigurationChange{Kind: "mode", ModeID: "auto"},
+		},
+	)
+	if err != nil || changed.Modes == nil || changed.Modes.CurrentModeID != "auto" ||
+		len(changed.Modes.Available) != 2 {
+		t.Fatalf("mode = %+v, %v", changed, err)
+	}
+
+	_, err = manager.SetConfiguration(
+		context.Background(),
+		application.SessionConfigurationTarget{
+			SessionID:      "app-session",
+			AgentSessionID: "wrong",
+			Change:         application.SessionConfigurationChange{Kind: "mode", ModeID: "auto"},
+		},
+	)
+	if err == nil {
+		t.Fatal("stale Agent session was accepted")
+	}
+}
+
+func TestPreparationCancelWhilePromptRuns(t *testing.T) {
+	manager := NewManager(nil, time.Now, func() string { return "generated-id" })
+	defer func() { _ = manager.Close() }()
+
+	workspace, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	connection := agentconnection.ConnectionInput{
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestFakeACPProcess"},
+		EnvironmentOverrides: []agentconnection.EnvironmentVariable{
+			{Name: "GO_WANT_FAKE_ACP", Value: "1"},
+			{Name: "FAKE_ACP_MODE", Value: "block_prompt"},
+		},
+	}
+	if _, err := manager.ExecutePreparation(
+		context.Background(),
+		application.ClaimedPreparationJob{
+			Kind:          "connect",
+			JobID:         "connect",
+			SessionID:     "app-session",
+			WorkspacePath: workspace,
+			Connection:    connection,
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	turn := make(chan application.PreparationJobCompletion, 1)
+	errors := make(chan error, 1)
+
+	go func() {
+		result, err := manager.ExecutePreparation(
+			ctx,
+			application.ClaimedPreparationJob{
+				Kind:      "turn",
+				JobID:     "turn",
+				SessionID: "app-session",
+				TurnID:    "turn",
+				Content:   []application.ContentPart{{Type: "text", Text: "hello"}},
+			},
+		)
+		turn <- result
+
+		errors <- err
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	if _, err := manager.ExecutePreparation(
+		ctx,
+		application.ClaimedPreparationJob{
+			Kind:        "cancel",
+			JobID:       "cancel",
+			SessionID:   "app-session",
+			TargetJobID: "turn",
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case result := <-turn:
+		if err := <-errors; err != nil || result.StopReason != "cancelled" {
+			t.Fatalf("turn = %+v, %v", result, err)
+		}
+	case <-ctx.Done():
+		t.Fatal("prompt did not stop after cancel")
+	}
+}
+
+func TestPreparationCancelTimeoutStopsOwnedProcess(t *testing.T) {
+	manager := NewManager(nil, time.Now, func() string { return "generated-id" })
+	defer func() { _ = manager.Close() }()
+
+	workspace, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	connection := agentconnection.ConnectionInput{
+		Command: os.Args[0], Args: []string{"-test.run=TestFakeACPProcess"},
+		EnvironmentOverrides: []agentconnection.EnvironmentVariable{
+			{Name: "GO_WANT_FAKE_ACP", Value: "1"},
+			{Name: "FAKE_ACP_MODE", Value: "ignore_cancel"},
+		},
+	}
+	if _, err := manager.ExecutePreparation(context.Background(), application.ClaimedPreparationJob{
+		Kind: "connect", JobID: "connect", SessionID: "app-session", WorkspacePath: workspace, Connection: connection,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	turn := make(chan application.PreparationJobCompletion, 1)
+
+	go func() {
+		result, _ := manager.ExecutePreparation(ctx, application.ClaimedPreparationJob{
+			Kind: "turn", JobID: "turn", SessionID: "app-session", TurnID: "turn",
+			Content: []application.ContentPart{{Type: "text", Text: "hello"}},
+		})
+		turn <- result
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	result, err := manager.ExecutePreparation(ctx, application.ClaimedPreparationJob{
+		Kind: "cancel", JobID: "cancel", SessionID: "app-session", TargetJobID: "turn",
+	})
+	if err != nil || result.StopReason != "interrupted" {
+		t.Fatalf("cancel=%+v, error=%v", result, err)
+	}
+
+	select {
+	case stopped := <-turn:
+		if stopped.StopReason != "interrupted" {
+			t.Fatalf("turn=%+v", stopped)
+		}
+	case <-ctx.Done():
+		t.Fatal("owned prompt did not stop")
+	}
+}
+
+func TestPreparationConfigOptions(t *testing.T) {
+	flat := sdk.SessionConfigSelectOptionsUngrouped{{Value: "safe", Name: "Safe"}}
+
+	tests := []struct {
+		name             string
+		input            sdk.SessionConfigOption
+		wantType, wantID string
+	}{
+		{
+			name: "select",
+			input: sdk.SessionConfigOption{
+				Select: &sdk.SessionConfigOptionSelect{
+					Id:           "mode",
+					Name:         "Mode",
+					Type:         "select",
+					CurrentValue: "safe",
+					Options:      sdk.SessionConfigSelectOptions{Ungrouped: &flat},
+				},
+			},
+			wantType: "select",
+			wantID:   "mode",
+		},
+		{
+			name: "boolean",
+			input: sdk.SessionConfigOption{
+				Boolean: &sdk.SessionConfigOptionBoolean{
+					Id:           "verbose",
+					Name:         "Verbose",
+					Type:         "boolean",
+					CurrentValue: true,
+				},
+			},
+			wantType: "boolean",
+			wantID:   "verbose",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := preparationConfigOptions([]sdk.SessionConfigOption{tt.input})
+			if len(got) != 1 || got[0].Type != tt.wantType || got[0].ConfigID != tt.wantID {
+				t.Fatalf("options = %+v", got)
+			}
+		})
 	}
 }
 
@@ -273,6 +540,8 @@ func TestFakeACPProcess(t *testing.T) {
 	reader := bufio.NewScanner(os.Stdin)
 	encoder := json.NewEncoder(os.Stdout)
 
+	var pendingPrompt json.RawMessage
+
 	for reader.Scan() {
 		var request struct {
 			JSONRPC string          `json:"jsonrpc"`
@@ -310,8 +579,61 @@ func TestFakeACPProcess(t *testing.T) {
 			}
 		}
 
-		if request.Method == "session/new" && os.Getenv("FAKE_ACP_MODE") == "session_timeout" {
+		if request.Method == "session/new" {
+			if os.Getenv("FAKE_ACP_MODE") == "session_timeout" {
+				continue
+			}
+
+			result = map[string]any{
+				"sessionId": "agent-session",
+				"modes": map[string]any{
+					"currentModeId":  "ask",
+					"availableModes": []map[string]any{{"id": "ask", "name": "Ask"}, {"id": "auto", "name": "Auto"}},
+				},
+			}
+		}
+
+		if request.Method == "session/prompt" {
+			if os.Getenv("FAKE_ACP_MODE") == "block_prompt" || os.Getenv("FAKE_ACP_MODE") == "ignore_cancel" {
+				pendingPrompt = append([]byte(nil), request.ID...)
+				continue
+			}
+
+			_ = encoder.Encode(
+				map[string]any{
+					"jsonrpc": "2.0",
+					"method":  "session/update",
+					"params": map[string]any{
+						"sessionId": "agent-session",
+						"update": map[string]any{
+							"sessionUpdate": "agent_message_chunk",
+							"content":       map[string]any{"type": "text", "text": "reply"},
+						},
+					},
+				},
+			)
+			result = map[string]any{"stopReason": "end_turn"}
+		}
+
+		if request.Method == "session/cancel" && pendingPrompt != nil {
+			if os.Getenv("FAKE_ACP_MODE") == "ignore_cancel" {
+				continue
+			}
+
+			_ = encoder.Encode(
+				map[string]any{
+					"jsonrpc": "2.0",
+					"id":      pendingPrompt,
+					"result":  map[string]any{"stopReason": "cancelled"},
+				},
+			)
+			pendingPrompt = nil
+
 			continue
+		}
+
+		if request.Method == "session/set_config_option" {
+			result = map[string]any{"configOptions": []map[string]any{}}
 		}
 
 		if err := encoder.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result}); err != nil {

@@ -55,11 +55,19 @@ type probeCheck struct {
 }
 
 type session struct {
-	process    *process
-	connection *sdk.ClientSideConnection
-	probe      agentconnection.Probe
-	methods    map[string]authMethod
-	input      agentconnection.ConnectionInput
+	process         *process
+	connection      *sdk.ClientSideConnection
+	agentSessionID  sdk.SessionId
+	pendingTurnID   string
+	pendingTurnDone chan struct{}
+	cancelTimedOut  bool
+	messages        []application.ConversationItem
+	modes           *application.SessionModes
+	configOptions   []application.SessionConfigOption
+	receiveSequence int64
+	probe           agentconnection.Probe
+	methods         map[string]authMethod
+	input           agentconnection.ConnectionInput
 }
 
 type authMethod struct {
