@@ -1,0 +1,49 @@
+name: Checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.26.6
+          cache-dependency-path: go.sum
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.9.0
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: arduino/setup-task@v3
+        with:
+          version: 3.45.5
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+          install-only: true
+      - run: npm install --global npm@11.12.1
+      - run: npm ci
+        working-directory: frontend
+      - run: npx playwright install chromium
+        working-directory: frontend
+      - run: task check
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-${{ github.run_id }}
+          path: frontend/test-results
+          if-no-files-found: ignore
+          retention-days: 7
