@@ -1,0 +1,98 @@
+.setup-form {
+  display: grid;
+  gap: var(--ds-space-6);
+}
+.authentication-complete {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-4);
+}
+.authentication-complete [role="alert"] {
+  flex: 1;
+}
+.setup-section {
+  border: var(--ds-border-width-soft) solid var(--border);
+  border-radius: var(--ds-radius-card);
+  background: var(--surface);
+  padding: var(--ds-space-card-padding);
+}
+.setup-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ds-space-4);
+  margin-bottom: var(--ds-space-4);
+}
+.setup-section-heading legend,
+.setup-section-heading h2 {
+  margin: 0;
+  font-size: var(--ds-font-size-title);
+  font-weight: var(--ds-font-weight-semibold);
+}
+.setup-section-heading p {
+  margin: var(--ds-space-1) 0 0;
+  color: var(--muted-foreground);
+}
+.candidate-list,
+.auth-methods {
+  display: grid;
+  gap: var(--ds-space-3);
+}
+.candidate {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-3);
+  border: var(--ds-border-width-control) solid var(--border);
+  border-radius: var(--ds-radius-md);
+  padding: var(--ds-space-4);
+  background: var(--surface-soft);
+}
+.candidate small,
+.candidate strong,
+.auth-method strong {
+  display: block;
+}
+.candidate small,
+.auth-method small,
+.setup-status,
+.auth-method p {
+  color: var(--muted-foreground);
+}
+.agent-logo,
+.auth-icon {
+  display: grid;
+  flex: 0 0 auto;
+  width: 2.5rem;
+  height: 2.5rem;
+  place-items: center;
+  border-radius: var(--ds-radius-md);
+  background: var(--secondary);
+}
+.agent-copy {
+  flex: 1;
+}
+.setup-empty,
+.auth-method {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-4);
+}
+.auth-method > div {
+  flex: 1;
+}
+.auth-method p,
+.setup-status {
+  margin: 0;
+}
+@media (max-width: 640px) {
+  .candidate,
+  .authentication-complete,
+  .setup-empty,
+  .auth-method,
+  .setup-section-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

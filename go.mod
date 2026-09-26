@@ -3,6 +3,7 @@ module github.com/yukihito-jokyu/TEJUN
 go 1.26.6
 
 require (
+	github.com/coder/acp-go-sdk v0.13.5
 	github.com/pressly/goose/v3 v3.26.0
 	github.com/wailsapp/wails/v3 v3.0.0-beta.25
 	modernc.org/sqlite v1.47.0
