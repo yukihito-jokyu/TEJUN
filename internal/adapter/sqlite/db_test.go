@@ -12,45 +12,58 @@ import (
 func TestOpenUpgradesPreparationTurnColumns(t *testing.T) {
 	ctx := context.Background()
 	path := t.TempDir() + "/test.db"
+
 	db, err := Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	migrationFS, err := fs.Sub(migrations, "migration")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	provider, err := goose.NewProvider(goose.DialectSQLite3, db, migrationFS, goose.WithLogger(goose.NopLogger()))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if _, err := provider.Down(ctx); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
+
 	db, err = Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() { _ = db.Close() })
+
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(preparation_turns)`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
+
 	for rows.Next() {
-		var cid, notNull, primaryKey int
-		var name, columnType string
-		var defaultValue sql.NullString
+		var (
+			cid, notNull, primaryKey int
+			name, columnType         string
+			defaultValue             sql.NullString
+		)
 		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
 			t.Fatal(err)
 		}
+
 		if name == "plan_revision" {
 			return
 		}
 	}
+
 	t.Fatal("plan_revision column missing after upgrade")
 }
 

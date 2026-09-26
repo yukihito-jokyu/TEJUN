@@ -55,28 +55,39 @@ func (r *PreparationRepository) GetPreparation(
 		return view, notFound(err)
 	}
 
-	chatRows, err := tx.QueryContext(ctx, `SELECT s.session_id,s.started_at,COALESCE((SELECT m.content_json FROM preparation_messages m WHERE m.session_id=s.session_id AND m.role='user' ORDER BY m.sequence LIMIT 1),'') FROM preparation_sessions s WHERE s.project_id=? ORDER BY s.started_at DESC,s.session_id DESC`, in.ProjectID)
+	chatRows, err := tx.QueryContext(
+		ctx,
+		`SELECT s.session_id,s.started_at,COALESCE((SELECT m.content_json FROM preparation_messages m WHERE m.session_id=s.session_id AND m.role='user' ORDER BY m.sequence LIMIT 1),'') FROM preparation_sessions s WHERE s.project_id=? ORDER BY s.started_at DESC,s.session_id DESC`,
+		in.ProjectID,
+	)
 	if err != nil {
 		return view, err
 	}
+
 	for chatRows.Next() {
-		var chat application.PreparationChat
-		var started, content string
+		var (
+			chat             application.PreparationChat
+			started, content string
+		)
 		if err = chatRows.Scan(&chat.SessionID, &started, &content); err != nil {
 			_ = chatRows.Close()
 			return view, err
 		}
+
 		if chat.StartedAt, err = time.Parse(time.RFC3339Nano, started); err != nil {
 			_ = chatRows.Close()
 			return view, err
 		}
+
 		chat.Title = "新しいチャット"
+
 		if content != "" {
 			var parts []application.ContentPart
 			if err = json.Unmarshal([]byte(content), &parts); err != nil {
 				_ = chatRows.Close()
 				return view, err
 			}
+
 			if len(parts) > 0 && parts[0].Text != "" {
 				chat.Title = parts[0].Text
 				if len([]rune(chat.Title)) > 40 {
@@ -84,22 +95,28 @@ func (r *PreparationRepository) GetPreparation(
 				}
 			}
 		}
+
 		view.Chats = append(view.Chats, chat)
 	}
+
 	if err = chatRows.Err(); err != nil {
 		_ = chatRows.Close()
 		return view, err
 	}
+
 	_ = chatRows.Close()
+
 	chatSession := currentSession
 	if in.ChatID != "" {
 		chatSession = ""
+
 		for _, chat := range view.Chats {
 			if chat.SessionID == in.ChatID {
 				chatSession = in.ChatID
 				break
 			}
 		}
+
 		if chatSession == "" {
 			return view, &shared.Error{Code: "not_found", Message: "チャットがありません"}
 		}
@@ -1533,10 +1550,12 @@ func (r *PreparationRepository) CompletePreparationJob(
 				return err
 			}
 		}
+
 		if c.Success && c.BriefSuggestion != nil {
 			if err := applyBriefSuggestion(ctx, tx, turnID, *c.BriefSuggestion); err != nil {
 				return err
 			}
+
 			if err := applyCheckSuggestion(ctx, tx, turnID, c.BriefSuggestion.CheckItems); err != nil {
 				return err
 			}
@@ -1567,63 +1586,116 @@ func (r *PreparationRepository) CompletePreparationJob(
 	return tx.Commit()
 }
 
-func applyBriefSuggestion(ctx context.Context, tx *sql.Tx, turnID string, suggestion application.PreparationBriefSuggestion) error {
+func applyBriefSuggestion(
+	ctx context.Context,
+	tx *sql.Tx,
+	turnID string,
+	suggestion application.PreparationBriefSuggestion,
+) error {
 	if suggestion.Purpose == "" && suggestion.IntendedUsers == "" && len(suggestion.CompletionCriteria) == 0 {
 		return nil
 	}
-	var projectID string
-	var revision int64
-	var purpose, users, criteriaJSON string
-	if err := tx.QueryRowContext(ctx, `SELECT p.project_id,t.brief_revision,p.purpose,p.intended_users,p.completion_criteria_json FROM preparation_turns t JOIN preparation_sessions s USING(session_id) JOIN preparations p ON p.project_id=s.project_id WHERE t.turn_id=?`, turnID).Scan(&projectID, &revision, &purpose, &users, &criteriaJSON); err != nil {
+
+	var (
+		projectID                    string
+		revision                     int64
+		purpose, users, criteriaJSON string
+	)
+	if err := tx.QueryRowContext(ctx, `SELECT p.project_id,t.brief_revision,p.purpose,p.intended_users,p.completion_criteria_json FROM preparation_turns t JOIN preparation_sessions s USING(session_id) JOIN preparations p ON p.project_id=s.project_id WHERE t.turn_id=?`, turnID).
+		Scan(&projectID, &revision, &purpose, &users, &criteriaJSON); err != nil {
 		return err
 	}
+
 	if suggestion.Purpose != "" {
 		purpose = suggestion.Purpose
 	}
+
 	if suggestion.IntendedUsers != "" {
 		users = suggestion.IntendedUsers
 	}
+
 	if len(suggestion.CompletionCriteria) > 0 {
 		encoded, err := json.Marshal(suggestion.CompletionCriteria)
 		if err != nil {
 			return err
 		}
+
 		criteriaJSON = string(encoded)
 	}
-	_, err := tx.ExecContext(ctx, `UPDATE preparations SET purpose=?,intended_users=?,completion_criteria_json=?,revision=revision+1 WHERE project_id=? AND revision=?`, purpose, users, criteriaJSON, projectID, revision)
+
+	_, err := tx.ExecContext(
+		ctx,
+		`UPDATE preparations SET purpose=?,intended_users=?,completion_criteria_json=?,revision=revision+1 WHERE project_id=? AND revision=?`,
+		purpose,
+		users,
+		criteriaJSON,
+		projectID,
+		revision,
+	)
+
 	return err
 }
 
-func applyCheckSuggestion(ctx context.Context, tx *sql.Tx, turnID string, items []application.PreparationCheckSuggestion) error {
+func applyCheckSuggestion(
+	ctx context.Context,
+	tx *sql.Tx,
+	turnID string,
+	items []application.PreparationCheckSuggestion,
+) error {
 	if len(items) == 0 || len(items) > 30 {
 		return nil
 	}
+
 	for _, item := range items {
 		if item.Title == "" || item.ExpectedResult == "" {
 			return nil
 		}
 	}
-	var projectID string
-	var revision int64
-	if err := tx.QueryRowContext(ctx, `SELECT s.project_id,t.plan_revision FROM preparation_turns t JOIN preparation_sessions s USING(session_id) WHERE t.turn_id=?`, turnID).Scan(&projectID, &revision); err != nil {
+
+	var (
+		projectID string
+		revision  int64
+	)
+	if err := tx.QueryRowContext(ctx, `SELECT s.project_id,t.plan_revision FROM preparation_turns t JOIN preparation_sessions s USING(session_id) WHERE t.turn_id=?`, turnID).
+		Scan(&projectID, &revision); err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE check_plans SET revision=revision+1 WHERE project_id=? AND revision=?`, projectID, revision)
+
+	result, err := tx.ExecContext(
+		ctx,
+		`UPDATE check_plans SET revision=revision+1 WHERE project_id=? AND revision=?`,
+		projectID,
+		revision,
+	)
 	if err != nil {
 		return err
 	}
+
 	changed, err := result.RowsAffected()
 	if err != nil || changed == 0 {
 		return err
 	}
+
 	if _, err = tx.ExecContext(ctx, `DELETE FROM check_items WHERE project_id=?`, projectID); err != nil {
 		return err
 	}
+
 	for i, item := range items {
-		if _, err = tx.ExecContext(ctx, `INSERT INTO check_items(check_id,project_id,sequence,title,instruction,expected_result,suggested_command,ai_required,human_required,human_evidence_requirement) VALUES(?,?,?,?,?,?,?,0,1,'none')`, fmt.Sprintf("%s:%d", turnID, i+1), projectID, i+1, item.Title, item.Instruction, item.ExpectedResult, item.SuggestedCommand); err != nil {
+		if _, err = tx.ExecContext(
+			ctx,
+			`INSERT INTO check_items(check_id,project_id,sequence,title,instruction,expected_result,suggested_command,ai_required,human_required,human_evidence_requirement) VALUES(?,?,?,?,?,?,?,0,1,'none')`,
+			fmt.Sprintf("%s:%d", turnID, i+1),
+			projectID,
+			i+1,
+			item.Title,
+			item.Instruction,
+			item.ExpectedResult,
+			item.SuggestedCommand,
+		); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
 

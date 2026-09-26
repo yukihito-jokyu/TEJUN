@@ -17,11 +17,16 @@ func TestTakeBriefSuggestion(t *testing.T) {
 		{"invalid", "```tejun-preparation\n{broken}\n```", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			messages := []application.ConversationItem{{Role: "agent", Content: []application.ContentPart{{Type: "text", Text: tc.text}}}}
+			messages := []application.ConversationItem{
+				{Role: "agent", Content: []application.ContentPart{{Type: "text", Text: tc.text}}},
+			}
+
 			got := takeBriefSuggestion(messages)
-			if tc.want == "" && got != nil || tc.want == "plan" && (got == nil || len(got.CheckItems) != 1) || tc.want != "" && tc.want != "plan" && (got == nil || got.Purpose != tc.want) {
+			if tc.want == "" && got != nil || tc.want == "plan" && (got == nil || len(got.CheckItems) != 1) ||
+				tc.want != "" && tc.want != "plan" && (got == nil || got.Purpose != tc.want) {
 				t.Fatalf("suggestion=%+v", got)
 			}
+
 			if tc.name == "valid" && messages[0].Content[0].Text != "一緒に準備します。" {
 				t.Fatalf("visible message=%q", messages[0].Content[0].Text)
 			}

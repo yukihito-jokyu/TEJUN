@@ -89,41 +89,75 @@ func TestAgentBriefSuggestionRespectsManualRevision(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, db, p := seededPreparation(t)
+
 			accepted, err := p.SendPreparationMessage(ctx, application.SendPreparationMessageInput{
-				ProjectID: "p", SessionID: "s", OperationID: "suggestion", Content: []application.ContentPart{{Type: "text", Text: "作りたい"}},
+				ProjectID:   "p",
+				SessionID:   "s",
+				OperationID: "suggestion",
+				Content:     []application.ContentPart{{Type: "text", Text: "作りたい"}},
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err = db.ExecContext(ctx, `UPDATE preparation_jobs SET state='running' WHERE job_id=?`, accepted.Data.JobID); err != nil {
+
+			if _, err = db.ExecContext(
+				ctx,
+				`UPDATE preparation_jobs SET state='running' WHERE job_id=?`,
+				accepted.Data.JobID,
+			); err != nil {
 				t.Fatal(err)
 			}
-			if _, err = db.ExecContext(ctx, `UPDATE preparation_turns SET state='running' WHERE turn_id=?`, accepted.Data.TurnID); err != nil {
+
+			if _, err = db.ExecContext(
+				ctx,
+				`UPDATE preparation_turns SET state='running' WHERE turn_id=?`,
+				accepted.Data.TurnID,
+			); err != nil {
 				t.Fatal(err)
 			}
+
 			if tc.manual != "" {
-				if _, err = db.ExecContext(ctx, `UPDATE preparations SET purpose=?,revision=revision+1 WHERE project_id='p'`, tc.manual); err != nil {
+				if _, err = db.ExecContext(
+					ctx,
+					`UPDATE preparations SET purpose=?,revision=revision+1 WHERE project_id='p'`,
+					tc.manual,
+				); err != nil {
 					t.Fatal(err)
 				}
 			}
+
 			err = NewPreparationRepository(db).CompletePreparationJob(ctx, application.PreparationJobCompletion{
-				JobID: accepted.Data.JobID, SessionID: "s", Success: true, CompletedAt: time.Now(),
-				BriefSuggestion: &application.PreparationBriefSuggestion{Purpose: "Agent purpose", CheckItems: []application.PreparationCheckSuggestion{{Title: "起動する", Instruction: "アプリを起動", ExpectedResult: "起動できる"}}},
+				JobID:       accepted.Data.JobID,
+				SessionID:   "s",
+				Success:     true,
+				CompletedAt: time.Now(),
+				BriefSuggestion: &application.PreparationBriefSuggestion{
+					Purpose: "Agent purpose",
+					CheckItems: []application.PreparationCheckSuggestion{
+						{Title: "起動する", Instruction: "アプリを起動", ExpectedResult: "起動できる"},
+					},
+				},
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
+
 			var purpose string
-			if err = db.QueryRowContext(ctx, `SELECT purpose FROM preparations WHERE project_id='p'`).Scan(&purpose); err != nil {
+			if err = db.QueryRowContext(ctx, `SELECT purpose FROM preparations WHERE project_id='p'`).
+				Scan(&purpose); err != nil {
 				t.Fatal(err)
 			}
+
 			if purpose != tc.want {
 				t.Fatalf("purpose=%q, want %q", purpose, tc.want)
 			}
+
 			var checkTitle string
-			if err = db.QueryRowContext(ctx, `SELECT title FROM check_items WHERE project_id='p'`).Scan(&checkTitle); err != nil {
+			if err = db.QueryRowContext(ctx, `SELECT title FROM check_items WHERE project_id='p'`).
+				Scan(&checkTitle); err != nil {
 				t.Fatal(err)
 			}
+
 			if checkTitle != "起動する" {
 				t.Fatalf("check title=%q", checkTitle)
 			}
@@ -133,35 +167,57 @@ func TestAgentBriefSuggestionRespectsManualRevision(t *testing.T) {
 
 func TestPreparationChatHistoryAfterNewSession(t *testing.T) {
 	ctx, db, p := seededPreparation(t)
-	if _, err := db.ExecContext(ctx, `INSERT INTO preparation_messages(message_id,session_id,turn_id,role,content_json,status,created_at,sequence) VALUES('old-message','s','old-turn','user','[{"type":"text","text":"古い手順書"}]','completed','2026-09-26T12:00:00Z',1)`); err != nil {
+	if _, err := db.ExecContext(
+		ctx,
+		`INSERT INTO preparation_messages(message_id,session_id,turn_id,role,content_json,status,created_at,sequence) VALUES('old-message','s','old-turn','user','[{"type":"text","text":"古い手順書"}]','completed','2026-09-26T12:00:00Z',1)`,
+	); err != nil {
 		t.Fatal(err)
 	}
+
 	before, err := p.GetPreparation(ctx, application.PreparationViewQuery{ProjectID: "p"})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	_, err = NewPreparationRepository(db).ChangeProjectWorkspace(ctx, application.ChangeProjectWorkspaceRecord{
-		ChangeProjectWorkspaceInput: application.ChangeProjectWorkspaceInput{ProjectID: "p", NewWorkspacePath: before.Project.WorkspacePath, ExpectedProjectRevision: before.Project.Revision, ConfirmSessionReset: true, OperationID: "new-chat"},
-		SessionID:                   "new-chat", JobID: "new-connect", EventID: "new-event", AcceptedAt: time.Now(),
+		ChangeProjectWorkspaceInput: application.ChangeProjectWorkspaceInput{
+			ProjectID:               "p",
+			NewWorkspacePath:        before.Project.WorkspacePath,
+			ExpectedProjectRevision: before.Project.Revision,
+			ConfirmSessionReset:     true,
+			OperationID:             "new-chat",
+		},
+		SessionID:  "new-chat",
+		JobID:      "new-connect",
+		EventID:    "new-event",
+		AcceptedAt: time.Now(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	current, err := p.GetPreparation(ctx, application.PreparationViewQuery{ProjectID: "p"})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if current.Session.SessionID != "new-chat" || len(current.Conversation.Items) != 0 || len(current.Chats) != 2 {
 		t.Fatalf("current chat=%+v", current)
 	}
+
 	archived, err := p.GetPreparation(ctx, application.PreparationViewQuery{ProjectID: "p", ChatID: "s"})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(archived.Conversation.Items) != 1 || archived.Chats[1].Title != "古い手順書" {
 		t.Fatalf("archived chat=%+v", archived)
 	}
-	if _, err = p.GetPreparation(ctx, application.PreparationViewQuery{ProjectID: "p", ChatID: "other-project-chat"}); err == nil {
+
+	if _, err = p.GetPreparation(
+		ctx,
+		application.PreparationViewQuery{ProjectID: "p", ChatID: "other-project-chat"},
+	); err == nil {
 		t.Fatal("foreign chat should be rejected")
 	}
 }

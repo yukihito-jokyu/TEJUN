@@ -247,25 +247,37 @@ func takeBriefSuggestion(messages []application.ConversationItem) *application.P
 		if messages[i].Role != "agent" || len(messages[i].Content) == 0 {
 			continue
 		}
+
 		message := &messages[i].Content[0].Text
+
 		start := strings.Index(*message, "```tejun-preparation\n")
 		if start < 0 {
 			continue
 		}
+
 		bodyStart := start + len("```tejun-preparation\n")
+
 		end := strings.Index((*message)[bodyStart:], "```")
 		if end < 0 || end > 16384 {
 			continue
 		}
+
 		var suggestion application.PreparationBriefSuggestion
-		if err := json.Unmarshal([]byte(strings.TrimSpace((*message)[bodyStart:bodyStart+end])), &suggestion); err != nil {
+		if err := json.Unmarshal(
+			[]byte(strings.TrimSpace((*message)[bodyStart:bodyStart+end])),
+			&suggestion,
+		); err != nil {
 			continue
 		}
+
 		*message = strings.TrimSpace((*message)[:start] + (*message)[bodyStart+end+3:])
-		if suggestion.Purpose != "" || suggestion.IntendedUsers != "" || len(suggestion.CompletionCriteria) > 0 || len(suggestion.CheckItems) > 0 {
+
+		if suggestion.Purpose != "" || suggestion.IntendedUsers != "" || len(suggestion.CompletionCriteria) > 0 ||
+			len(suggestion.CheckItems) > 0 {
 			return &suggestion
 		}
 	}
+
 	return nil
 }
 
