@@ -37,6 +37,8 @@ func TestParseCheckResults(t *testing.T) {
 		valid        bool
 	}{
 		{"valid", `{"results":[{"checkId":"a","status":"completed","evidence":"ok"},{"checkId":"b","status":"failed","evidence":"error"}]}`, true},
+		{"fenced", "確認しました。\n```json\n" + `{"results":[{"checkId":"a","status":"completed","evidence":"ok"},{"checkId":"b","status":"failed","evidence":"error"}]}` + "\n```", true},
+		{"plain fence", "```\n" + `{"results":[{"checkId":"a","status":"completed","evidence":"ok"},{"checkId":"b","status":"failed","evidence":"error"}]}` + "\n```", true},
 		{"missing", `{"results":[{"checkId":"a","status":"completed","evidence":"ok"}]}`, false},
 		{"duplicate", `{"results":[{"checkId":"a","status":"completed","evidence":"ok"},{"checkId":"a","status":"failed","evidence":"error"}]}`, false},
 		{"unknown", `{"results":[{"checkId":"a","status":"completed","evidence":"ok"},{"checkId":"c","status":"failed","evidence":"error"}]}`, false},

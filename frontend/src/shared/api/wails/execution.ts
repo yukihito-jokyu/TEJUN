@@ -9,6 +9,9 @@ export async function getExecution(projectId: string, conversationCursor?: numbe
   });
   return {
     ...view,
+    activeRun: view.activeRun
+      ? { ...view.activeRun, targetedCheckIds: nonNull(view.activeRun.targetedCheckIds) }
+      : null,
     checks: nonNull(view.checks).map((check) => ({
       ...check,
       evidence: { ai: nonNull(check.evidence.ai), human: nonNull(check.evidence.human) },
@@ -24,6 +27,15 @@ export async function getExecution(projectId: string, conversationCursor?: numbe
         content: nonNull(item.content),
       })),
     },
+    activity: view.activity
+      ? {
+          ...view.activity,
+          items: nonNull(view.activity.items).map((item) => ({
+            ...item,
+            content: nonNull(item.content),
+          })),
+        }
+      : null,
     readiness: { ...view.readiness, blockingReasons: nonNull(view.readiness.blockingReasons) },
   };
 }
@@ -33,12 +45,6 @@ export const runPendingChecks = (executionId: string, expectedRevision: number) 
   ExecutionService.RunPendingChecks({
     executionId,
     expectedRevision,
-    operationId: crypto.randomUUID(),
-  });
-export const sendExecutionMessage = (executionId: string, text: string) =>
-  ExecutionService.SendExecutionMessage({
-    executionId,
-    content: [{ type: "text", text, evidenceId: "", url: "", name: "", mimeType: "" }],
     operationId: crypto.randomUUID(),
   });
 export const setHumanCheck = (
@@ -72,6 +78,29 @@ export const attachHumanEvidence = (
     displayName: sourcePath.split(/[\\/]/).pop() ?? "",
     operationId: crypto.randomUUID(),
   });
+export async function attachHumanImageEvidence(
+  executionId: string,
+  checkId: string,
+  expectedRevision: number,
+  file: File,
+) {
+  const imageData = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () =>
+      resolve(typeof reader.result === "string" ? (reader.result.split(",", 2)[1] ?? "") : "");
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+  return ExecutionService.AttachHumanEvidence({
+    executionId,
+    checkId,
+    expectedRevision,
+    kind: "image",
+    imageData,
+    displayName: file.name || "貼り付けた画像",
+    operationId: crypto.randomUUID(),
+  });
+}
 export const respondToExecutionPermission = (
   sessionId: string,
   permissionRequestId: string,

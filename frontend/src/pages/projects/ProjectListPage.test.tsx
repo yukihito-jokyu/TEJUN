@@ -424,7 +424,7 @@ it("保存先選択取消は送信せず、既存file identityを確認して同
   await screen.findByText(/現在のサイズ 42 バイト/);
   fireEvent.click(screen.getByRole("button", { name: "既存ファイルを置き換えて出力" }));
   await screen.findByRole("alert");
-  expect(document.activeElement).toBe(screen.getByRole("alert"));
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("alert")));
   fireEvent.click(screen.getByRole("button", { name: "既存ファイルを置き換えて出力" }));
   await waitFor(() => expect(exportProcedure).toHaveBeenCalledTimes(2));
   expect(vi.mocked(exportProcedure).mock.calls[0][2]).toMatchObject({
@@ -471,7 +471,7 @@ it.each(["destination", "overwriteIdentity"])(
     fireEvent.click(screen.getByRole("button", { name: "既存ファイルを置き換えて出力" }));
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("保存先を選び直してください");
-    expect(document.activeElement).toBe(alert);
+    await waitFor(() => expect(document.activeElement).toBe(alert));
     expect((screen.getByRole("button", { name: "出力する" }) as HTMLButtonElement).disabled).toBe(
       true,
     );
@@ -526,7 +526,7 @@ it("保存先選択後に新規ファイルが作られたら確認をやり直�
   fireEvent.click(screen.getByRole("button", { name: "出力する" }));
   const alert = await screen.findByRole("alert");
   expect(alert.textContent).toContain("保存先を選び直してください");
-  expect(document.activeElement).toBe(alert);
+  await waitFor(() => expect(document.activeElement).toBe(alert));
   expect((screen.getByRole("button", { name: "出力する" }) as HTMLButtonElement).disabled).toBe(
     true,
   );

@@ -89,6 +89,89 @@ function props() {
 }
 
 describe("ProcedurePage", () => {
+  it("会話を役割別アイコンと改行を保った吹き出しで表示する", () => {
+    const input = props();
+    const messages: ProcedureView["conversation"]["items"] = [
+      {
+        messageId: "user",
+        turnId: "turn",
+        role: "user",
+        status: "completed",
+        content: [{ type: "text", text: "修正して" }],
+      },
+      {
+        messageId: "system",
+        turnId: "turn",
+        role: "system",
+        status: "completed",
+        content: [{ type: "text", text: "確認した" }],
+      },
+      {
+        messageId: "agent",
+        turnId: "turn",
+        role: "agent",
+        status: "completed",
+        content: [
+          { type: "text", text: "1行目" },
+          { type: "text", text: "2行目" },
+        ],
+      },
+    ];
+    const { container } = render(
+      <ProcedurePage
+        {...input}
+        view={{ ...view, conversation: { ...view.conversation, items: messages } }}
+      />,
+    );
+    expect(screen.getByRole("link", { name: "一覧に戻る" }).getAttribute("href")).toBe(
+      "#/projects",
+    );
+    expect(screen.getByText("完了：確認した")).toBeTruthy();
+    expect(container.querySelectorAll(".procedure-message-agent p").item(1).textContent).toBe(
+      "1行目\n2行目",
+    );
+    expect(container.querySelector(".procedure-message-user .lucide-user-round")).toBeTruthy();
+    expect(container.querySelector(".procedure-message-system .lucide-terminal")).toBeTruthy();
+    expect(container.querySelector(".procedure-message-agent .lucide-bot")).toBeTruthy();
+    expect(screen.getByText("修正を依頼できます")).toBeTruthy();
+  });
+
+  it("手順のコマンドとAI証跡の本文を表示する", async () => {
+    const input = props();
+    render(
+      <ProcedurePage
+        {...input}
+        view={{
+          ...view,
+          evidence: { ...view.evidence, ai: [{ ...view.evidence.ai[0], kind: "text" }] },
+          procedure: {
+            ...view.procedure,
+            document: {
+              ...view.procedure.document,
+              steps: [{ ...view.procedure.document.steps[0], command: "go version" }],
+            },
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText("$ go version")).toBeTruthy();
+    expect(await screen.findByText("/tmp")).toBeTruthy();
+  });
+
+  it("画像証跡を手順の中に表示する", async () => {
+    const input = props();
+    input.onLoadEvidence = vi.fn().mockResolvedValue({
+      summary: view.evidence.human[0],
+      source: { actor: "human" },
+      integrity: "verified",
+      image: { previewUrl: "/evidence-preview/image", alt: "確認画面" },
+    });
+    render(<ProcedurePage {...input} />);
+    const image = await screen.findByRole("img", { name: "確認画面" });
+    expect(image.getAttribute("src")).toBe("/evidence-preview/image");
+    expect(input.onLoadEvidence).toHaveBeenCalledWith("human-1");
+  });
+
   it("工程ヘッダーを表示し、Escで未保存の直接編集を破棄する", () => {
     const input = props();
     render(<ProcedurePage {...input} />);
@@ -114,6 +197,7 @@ describe("ProcedurePage", () => {
     const input = props();
     input.onLoadEvidence = vi
       .fn()
+      .mockResolvedValueOnce({ summary: view.evidence.human[0], integrity: "verified" })
       .mockResolvedValueOnce({
         summary: view.evidence.ai[0],
         source: { actor: "ai" },
@@ -153,7 +237,8 @@ describe("ProcedurePage", () => {
         }}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "AI実行の証跡を見る" }));
+    expect(screen.getAllByRole("button", { name: "確認の証跡を見る" })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "確認の証跡を見る" }));
     expect(await screen.findByRole("button", { name: "証跡を再取得" })).toBeTruthy();
     expect(screen.queryByText("この項目に人間の証跡はありません。")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "証跡を再取得" }));
@@ -194,6 +279,7 @@ describe("ProcedurePage", () => {
     let failPage!: (error: Error) => void;
     input.onLoadEvidence = vi
       .fn()
+      .mockResolvedValueOnce({ summary: view.evidence.human[0], integrity: "verified" })
       .mockResolvedValueOnce({
         summary: view.evidence.ai[0],
         source: { actor: "ai", runId: "run-1" },
@@ -202,12 +288,12 @@ describe("ProcedurePage", () => {
       })
       .mockImplementationOnce(() => new Promise((_, reject) => (failPage = reject)));
     render(<ProcedurePage {...input} />);
-    fireEvent.click(screen.getByRole("button", { name: "AI実行の証跡を見る" }));
+    fireEvent.click(screen.getByRole("button", { name: "確認の証跡を見る" }));
     await screen.findByText("最初");
     const more = screen.getByRole("button", { name: "続きを読む" });
     fireEvent.click(more);
     fireEvent.click(more);
-    expect(input.onLoadEvidence).toHaveBeenCalledTimes(2);
+    expect(input.onLoadEvidence).toHaveBeenCalledTimes(3);
     failPage(new Error("取得失敗"));
     expect(await screen.findByText("取得失敗")).toBeTruthy();
     expect(screen.getByText("最初")).toBeTruthy();
@@ -225,6 +311,7 @@ describe("ProcedurePage", () => {
     let finishOld!: (detail: unknown) => void;
     input.onLoadEvidence = vi
       .fn()
+      .mockResolvedValueOnce({ summary: view.evidence.human[0], integrity: "verified" })
       .mockImplementationOnce(() => new Promise((resolve) => (finishOld = resolve)))
       .mockResolvedValueOnce({
         summary: view.evidence.human[0],
@@ -233,7 +320,7 @@ describe("ProcedurePage", () => {
         textPage: { content: "新しい証跡", truncated: false },
       });
     render(<ProcedurePage {...input} />);
-    fireEvent.click(screen.getByRole("button", { name: "AI実行の証跡を見る" }));
+    fireEvent.click(screen.getByRole("button", { name: "確認の証跡を見る" }));
     fireEvent.click(screen.getByRole("button", { name: "閉じる" }));
     fireEvent.click(screen.getByRole("button", { name: "人間確認の証跡を見る" }));
     expect(await screen.findByText("新しい証跡")).toBeTruthy();
@@ -348,10 +435,10 @@ describe("ProcedurePage", () => {
     };
     const input = props();
     render(<ProcedurePage {...input} />);
-    expect(screen.getByRole("button", { name: "AI実行の証跡を見る" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "確認の証跡を見る" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "人間確認の証跡を見る" })).toBeTruthy();
-    expect(input.onLoadEvidence).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "AI実行の証跡を見る" }));
+    expect(input.onLoadEvidence).toHaveBeenCalledWith("human-1");
+    fireEvent.click(screen.getByRole("button", { name: "確認の証跡を見る" }));
     await waitFor(() => expect(input.onLoadEvidence).toHaveBeenCalledWith("ai-1"));
     expect(await screen.findByText("/tmp")).toBeTruthy();
   });

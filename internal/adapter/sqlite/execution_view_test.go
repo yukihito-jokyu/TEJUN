@@ -40,6 +40,7 @@ func TestExecutionViewSnapshot(t *testing.T) {
 
 			if view.Project.ProjectID != "p" || view.Session.SessionID != "s" || view.Execution.ExecutionID != "e" ||
 				len(view.Checks) != 1 ||
+				view.Checks[0].SuggestedCommand != "go version" ||
 				len(view.Conversation.Items) != tt.wantItems {
 				t.Fatalf("view=%+v", view)
 			}
@@ -111,6 +112,7 @@ func TestExecutionViewRestoresCheckDetails(t *testing.T) {
 		!view.Checks[0].Human.CheckedAt.Equal(at) ||
 		len(view.Checks[0].Evidence.Human) != 0 ||
 		len(view.Checks[0].Evidence.AI) != 1 ||
+		view.Checks[0].Evidence.AI[0].Text != "done" ||
 		view.Checks[1].AI.FailureSummary != "agent failed" {
 		t.Fatalf("view=%+v", view)
 	}

@@ -18,7 +18,7 @@ const evidence = [
   {
     evidenceId: "ai-1",
     actor: "ai",
-    kind: "command_output",
+    kind: "text",
     displayName: "AI の実行結果",
     createdAt: "2026-09-27T00:00:00Z",
   },
@@ -64,7 +64,17 @@ function snapshot() {
     source: { executionId: "execution-p", executionRevision: 3, checkCount: 1, evidenceCount: 2 },
     evidence: { ai: [evidence[0]], human: [evidence[1]] },
     integrity: { status: "valid", issues: [] },
-    conversation: { items: [], previousCursor: null, hasPrevious: false },
+    conversation: {
+      items: [] as Array<{
+        messageId: string;
+        turnId: string;
+        role: string;
+        status: string;
+        content: { type: string; text: string }[];
+      }>,
+      previousCursor: null,
+      hasPrevious: false,
+    },
     activeRevision: null as null | {
       sessionId: string;
       turnId: string;
@@ -212,26 +222,36 @@ test("手順書を編集し、分離した証跡を確認して完成・出力�
   await page.goto("/#/projects/p/procedure");
   await expect(page.getByRole("heading", { name: "確認手順書" })).toBeVisible();
   await expect(page.getByText("動作チェックとの整合性を確認済み")).toBeVisible();
-  const ai = page.getByRole("button", { name: "実行結果の証跡を見る" });
-  const human = page.getByRole("button", { name: "人間の確認画像の証跡を見る" });
-  await expect(ai).toBeVisible();
-  await expect(human).toBeVisible();
+  const evidenceButton = page.getByRole("button", { name: "動作確認の証跡を見る" });
+  await expect(evidenceButton).toHaveCount(1);
+  await expect(page.getByText("$ npm test")).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "手順書本文" }).getByText("テスト開始"),
+  ).toBeVisible();
+  await expect
+    .poll(() =>
+      page
+        .getByRole("region", { name: "手順書本文" })
+        .getByRole("img", { name: "確認画像" })
+        .evaluate((element: HTMLImageElement) => element.naturalWidth),
+    )
+    .toBeGreaterThan(0);
 
-  await ai.click();
+  await evidenceButton.click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toContainText("テスト開始");
   await expect(dialog.getByRole("region", { name: "AIの証跡" })).toContainText("実行結果");
   await expect(dialog.getByRole("region", { name: "人間の証跡" })).toContainText("人間の確認画像");
+  await expect(dialog.getByRole("img", { name: "確認画像" })).toBeVisible();
   await dialog.getByRole("button", { name: "続きを読む" }).click();
   await expect(dialog).toContainText("全件成功");
   await dialog.getByRole("button", { name: "閉じる" }).click();
-  await expect(ai).toBeFocused();
-  await human.click();
-  await expect(dialog.getByRole("img", { name: "確認画像" })).toBeVisible();
-  await dialog.getByRole("button", { name: "閉じる" }).click();
-  expect(
-    mock.calls.filter((call) => call.id === method.evidence).map((call) => call.input.evidenceId),
-  ).toEqual(["ai-1", "human-1", "ai-1", "human-1", "ai-1"]);
+  await expect(evidenceButton).toBeFocused();
+  const evidenceIds = mock.calls
+    .filter((call) => call.id === method.evidence)
+    .map((call) => call.input.evidenceId);
+  expect(evidenceIds.filter((id) => id === "ai-1").length).toBeGreaterThanOrEqual(2);
+  expect(evidenceIds).toContain("human-1");
 
   await page.getByRole("button", { name: "直接編集" }).click();
   await page.getByLabel("手順書タイトル").fill("更新した手順書");
@@ -290,6 +310,49 @@ test("手順書を編集し、分離した証跡を確認して完成・出力�
   });
 });
 
+test("手順が多くても画面全体ではなく手順書本文をスクロールできる", async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 600 });
+  const state = snapshot();
+  state.procedure.document.steps = Array.from({ length: 20 }, (_, index) => ({
+    stepId: `step-${index}`,
+    clientKey: `step-${index}`,
+    title: `動作確認 ${index + 1}`,
+    description: "結果を確認",
+    command: "npm test",
+    notes: [],
+    evidenceRefs: [],
+  }));
+  state.conversation.items = Array.from({ length: 30 }, (_, index) => ({
+    messageId: `message-${index}`,
+    turnId: `turn-${index}`,
+    role: index % 2 ? "agent" : "user",
+    status: "completed",
+    content: [{ type: "text", text: `会話 ${index + 1}` }],
+  }));
+  await mockProcedure(page, state);
+  await page.goto("/#/projects/p/procedure");
+  const workspace = page.getByRole("region", { name: "手順書本文" });
+  await expect(page.getByRole("heading", { name: "動作確認 20" })).toBeAttached();
+  const before = await workspace.evaluate((element) => ({
+    client: element.clientHeight,
+    content: element.scrollHeight,
+    top: element.scrollTop,
+  }));
+  expect(before.content).toBeGreaterThan(before.client);
+  await workspace.evaluate((element) => element.scrollTo({ top: element.scrollHeight }));
+  expect(await workspace.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  await expect(page.getByRole("heading", { name: "動作確認 20" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "作成工程" })).toBeVisible();
+  const chat = page.getByRole("list").filter({ hasText: "会話 30" });
+  expect(await chat.evaluate((element) => element.scrollHeight)).toBeGreaterThan(
+    await chat.evaluate((element) => element.clientHeight),
+  );
+  await chat.evaluate((element) => element.scrollTo({ top: element.scrollHeight }));
+  expect(await chat.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  await page.evaluate(() => window.scrollTo(0, 1000));
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+});
+
 test("修正依頼と確認に応答し、競合入力の保持と編集破棄を確認する", async ({ page }) => {
   const state = snapshot();
   const mock = await mockProcedure(page, state);
@@ -308,7 +371,7 @@ test("修正依頼と確認に応答し、競合入力の保持と編集破棄�
       requestedSchema: { type: "object" },
     },
   ];
-  await page.getByRole("button", { name: "再取得" }).click();
+  await page.reload();
   await expect(page.getByText("確認してください")).toBeVisible();
   await page.getByLabel("回答内容").fill('{"ok":true}');
   await page.getByRole("button", { name: "応答する" }).click();
@@ -328,7 +391,7 @@ test("修正依頼と確認に応答し、競合入力の保持と編集破棄�
     page.getByRole("status").filter({ hasText: "入力は保持されています" }),
   ).toBeVisible();
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "再取得" }).click();
+  await page.reload();
   await page.getByRole("button", { name: "直接編集" }).click();
   await expect(page.getByLabel("概要")).toHaveValue("動作確認の結果");
   expect(state.procedure.status).toBe("draft");

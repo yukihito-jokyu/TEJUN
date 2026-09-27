@@ -68,6 +68,10 @@ type session struct {
 	pendingTurnDone       chan struct{}
 	cancelTimedOut        bool
 	messages              []application.ConversationItem
+	activityPhase         string
+	activityTools         []application.PreparationToolActivity
+	activityLog           []application.ConversationItem
+	activityMessageID     string
 	modes                 *application.SessionModes
 	configOptions         []application.SessionConfigOption
 	receiveSequence       int64

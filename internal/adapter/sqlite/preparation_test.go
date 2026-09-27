@@ -134,7 +134,7 @@ func TestAgentBriefSuggestionRespectsManualRevision(t *testing.T) {
 				BriefSuggestion: &application.PreparationBriefSuggestion{
 					Purpose: "Agent purpose",
 					CheckItems: []application.PreparationCheckSuggestion{
-						{Title: "起動する", Instruction: "アプリを起動", ExpectedResult: "起動できる"},
+						{Title: "起動する", Instruction: "アプリを起動", ExpectedResult: "起動できる", SuggestedCommand: "task dev"},
 					},
 				},
 			})
@@ -152,14 +152,46 @@ func TestAgentBriefSuggestionRespectsManualRevision(t *testing.T) {
 				t.Fatalf("purpose=%q, want %q", purpose, tc.want)
 			}
 
-			var checkTitle string
-			if err = db.QueryRowContext(ctx, `SELECT title FROM check_items WHERE project_id='p'`).
-				Scan(&checkTitle); err != nil {
+			var checkTitle, requirement string
+			if err = db.QueryRowContext(ctx, `SELECT title,human_evidence_requirement FROM check_items WHERE project_id='p'`).
+				Scan(&checkTitle, &requirement); err != nil {
 				t.Fatal(err)
 			}
 
-			if checkTitle != "起動する" {
-				t.Fatalf("check title=%q", checkTitle)
+			if checkTitle != "起動する" || requirement != "text_or_image" {
+				t.Fatalf("check title=%q requirement=%q", checkTitle, requirement)
+			}
+		})
+	}
+}
+
+func TestSaveCheckPlanEvidenceFollowsCommand(t *testing.T) {
+	for _, tc := range []struct {
+		name, command, want string
+	}{
+		{name: "command requires evidence", command: "go version", want: "text_or_image"},
+		{name: "no command makes evidence optional", command: "  ", want: "none"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, db, preparation := seededPreparation(t)
+
+			result, err := preparation.SaveCheckPlan(ctx, application.SaveCheckPlanInput{
+				ProjectID: "p", ExpectedPreparationRevision: 1, ExpectedPlanRevision: 1,
+				OperationID: "save", Items: []application.CheckItemInput{{
+					ClientKey: "one", Title: "確認", ExpectedResult: "成功",
+					SuggestedCommand: tc.command, HumanRequired: true,
+					HumanEvidenceRequirement: "none",
+				}},
+			})
+			if err != nil || result.Data.Items[0].HumanEvidenceRequirement != tc.want {
+				t.Fatalf("saved=%+v err=%v", result, err)
+			}
+
+			var stored string
+			if err := db.QueryRowContext(ctx, `SELECT human_evidence_requirement FROM check_items WHERE project_id='p'`).
+				Scan(&stored); err != nil ||
+				stored != tc.want {
+				t.Fatalf("stored=%q err=%v", stored, err)
 			}
 		})
 	}

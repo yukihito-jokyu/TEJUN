@@ -13,6 +13,7 @@ func TestTakeBriefSuggestion(t *testing.T) {
 		text string
 		want string
 	}{
+		{"prompt example", preparationInstruction, "開発環境の構築手順を共有する"},
 		{"valid", "一緒に準備します。\n```tejun-preparation\n{\"purpose\":\"デプロイ手順を共有する\"}\n```", "デプロイ手順を共有する"},
 		{"plan", "案を作ります。\n```tejun-preparation\n{\"checkItems\":[{\"title\":\"起動\",\"expectedResult\":\"起動する\"}]}\n```", "plan"},
 		{"question", "```tejun-preparation\r\n{\"question\":\"何の作業を手順書にしますか？\"}\r\n```", "question"},

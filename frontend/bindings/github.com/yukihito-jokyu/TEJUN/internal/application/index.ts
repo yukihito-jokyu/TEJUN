@@ -20,6 +20,7 @@ export type {
     ExecutionSummary,
     ExecutionView,
     PermissionRequestView,
+    PreparationActivity,
     PreparationBrief,
     PreparationChat,
     PreparationUpdate,

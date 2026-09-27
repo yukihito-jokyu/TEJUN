@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/yukihito-jokyu/TEJUN/internal/domain/agentconnection"
+	"github.com/yukihito-jokyu/TEJUN/internal/domain/shared"
 )
 
 type RunPendingChecksInput struct {
@@ -42,6 +43,9 @@ type ClaimedExecutionJob struct {
 
 type ExecutionCheckTarget struct {
 	CheckID, Instruction, ExpectedResult string
+	Sequence                             int
+	Title                                string
+	SuggestedCommand                     string
 }
 
 type ExecutionCheckResult struct {
@@ -49,9 +53,11 @@ type ExecutionCheckResult struct {
 }
 
 type ExecutionJobResult struct {
-	Message   string
-	Checks    []ExecutionCheckResult
-	Cancelled bool
+	Message     string
+	Checks      []ExecutionCheckResult
+	Logs        []string
+	Cancelled   bool
+	Incremental bool
 }
 
 type ExecutionJobRepository interface {
@@ -59,6 +65,15 @@ type ExecutionJobRepository interface {
 	ClaimExecutionJob(context.Context) (*ClaimedExecutionJob, error)
 	ReconnectExecutionSession(context.Context, ClaimedExecutionJob, string, string, time.Time) error
 	CompleteExecutionJob(context.Context, ClaimedExecutionJob, ExecutionJobResult, error, time.Time) error
+	StartExecutionCheck(context.Context, ClaimedExecutionJob, ExecutionCheckTarget, time.Time) error
+	CompleteExecutionCheck(
+		context.Context,
+		ClaimedExecutionJob,
+		ExecutionCheckTarget,
+		ExecutionCheckResult,
+		[]string,
+		time.Time,
+	) error
 	CancelExecutionJob(context.Context, string, string, time.Time) (bool, error)
 	AcceptExecutionCancellation(
 		context.Context,
@@ -147,7 +162,48 @@ func (r *ExecutionRunner) RunOne(ctx context.Context) (bool, error) {
 	}
 
 	if executeErr == nil {
-		response, executeErr = r.executor.ExecuteExecutionJob(ctx, *job)
+		if job.Kind == "checks" {
+			response.Incremental = true
+
+			for _, check := range job.Checks {
+				if executeErr = r.repository.StartExecutionCheck(ctx, *job, check, r.now()); executeErr != nil {
+					break
+				}
+
+				single := *job
+				single.Checks = []ExecutionCheckTarget{check}
+
+				var result ExecutionJobResult
+
+				result, executeErr = r.executor.ExecuteExecutionJob(ctx, single)
+				if executeErr != nil || result.Cancelled {
+					response.Cancelled = result.Cancelled
+					response.Logs = append(response.Logs, result.Logs...)
+
+					break
+				}
+
+				if len(result.Checks) != 1 {
+					executeErr = &shared.Error{Code: "invalid_state", Message: "AIチェックの結果が不正です"}
+					break
+				}
+
+				if executeErr = r.repository.CompleteExecutionCheck(
+					ctx,
+					*job,
+					check,
+					result.Checks[0],
+					result.Logs,
+					r.now(),
+				); executeErr != nil {
+					break
+				}
+
+				response.Checks = append(response.Checks, result.Checks[0])
+			}
+		} else {
+			response, executeErr = r.executor.ExecuteExecutionJob(ctx, *job)
+		}
 	}
 
 	completionCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), jobCompletionTimeout)

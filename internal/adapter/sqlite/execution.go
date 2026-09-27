@@ -95,10 +95,14 @@ AND (? = '' OR e.execution_id = ?) ORDER BY e.started_at DESC, e.execution_id DE
 		snapshot.ActiveRunID = activeRunID.String
 	}
 
-	rows, err := tx.QueryContext(ctx, `SELECT check_id, sequence, title, instruction, expected_result,
+	rows, err := tx.QueryContext(
+		ctx,
+		`SELECT check_id, sequence, title, instruction, expected_result, suggested_command,
 ai_required, human_required, ai_status, human_status, human_evidence_requirement,
 ai_checked_at, human_checked_at, ai_failure_summary FROM execution_checks
-WHERE execution_id = ? ORDER BY sequence`, snapshot.ExecutionID)
+WHERE execution_id = ? ORDER BY sequence`,
+		snapshot.ExecutionID,
+	)
 	if err != nil {
 		return execution.Snapshot{}, err
 	}
@@ -107,9 +111,22 @@ WHERE execution_id = ? ORDER BY sequence`, snapshot.ExecutionID)
 		check := execution.Check{Evidence: []execution.Evidence{}}
 
 		var aiCheckedAt, humanCheckedAt sql.NullString
-		if err := rows.Scan(&check.ID, &check.Sequence, &check.Title, &check.Instruction,
-			&check.ExpectedResult, &check.AIRequired, &check.HumanRequired, &check.AIStatus, &check.HumanStatus,
-			&check.HumanEvidenceRequirement, &aiCheckedAt, &humanCheckedAt, &check.AIFailureSummary); err != nil {
+		if err := rows.Scan(
+			&check.ID,
+			&check.Sequence,
+			&check.Title,
+			&check.Instruction,
+			&check.ExpectedResult,
+			&check.SuggestedCommand,
+			&check.AIRequired,
+			&check.HumanRequired,
+			&check.AIStatus,
+			&check.HumanStatus,
+			&check.HumanEvidenceRequirement,
+			&aiCheckedAt,
+			&humanCheckedAt,
+			&check.AIFailureSummary,
+		); err != nil {
 			_ = rows.Close()
 			return execution.Snapshot{}, err
 		}
@@ -362,7 +379,8 @@ func (r *ExecutionRepository) SetHumanCheck(
 			found := false
 
 			for _, evidence := range check.Evidence {
-				if evidence.Actor == "human" && evidence.Kind == check.HumanEvidenceRequirement &&
+				if evidence.Actor == "human" &&
+					execution.EvidenceMatches(check.HumanEvidenceRequirement, evidence.Kind) &&
 					evidence.Status == "available" {
 					found = true
 				}
@@ -514,7 +532,7 @@ func (r *ExecutionRepository) GenerateProcedureDraft(
 	for _, check := range snapshot.Checks {
 		step := procedure.Step{
 			ID: check.ID, ClientKey: check.ID, Title: check.Title, Description: check.Instruction,
-			Command: "", Notes: []string{}, EvidenceRefs: []procedure.EvidenceRef{},
+			Command: check.SuggestedCommand, Notes: []string{}, EvidenceRefs: []procedure.EvidenceRef{},
 		}
 		for _, evidence := range check.Evidence {
 			step.EvidenceRefs = append(step.EvidenceRefs, procedure.EvidenceRef{

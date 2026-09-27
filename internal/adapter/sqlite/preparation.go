@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/yukihito-jokyu/TEJUN/internal/application"
@@ -14,6 +15,14 @@ import (
 )
 
 type PreparationRepository struct{ db *sql.DB }
+
+func evidenceRequirementForCommand(command string) string {
+	if strings.TrimSpace(command) != "" {
+		return "text_or_image"
+	}
+
+	return "none"
+}
 
 func NewPreparationRepository(db *sql.DB) *PreparationRepository { return &PreparationRepository{db} }
 
@@ -781,7 +790,7 @@ func (r *PreparationRepository) SaveCheckPlan(
 			SuggestedCommand:         item.SuggestedCommand,
 			AIRequired:               item.AIRequired,
 			HumanRequired:            item.HumanRequired,
-			HumanEvidenceRequirement: item.HumanEvidenceRequirement,
+			HumanEvidenceRequirement: evidenceRequirementForCommand(item.SuggestedCommand),
 		}
 
 		_, e = tx.ExecContext(
@@ -1683,7 +1692,7 @@ func applyCheckSuggestion(
 	for i, item := range items {
 		if _, err = tx.ExecContext(
 			ctx,
-			`INSERT INTO check_items(check_id,project_id,sequence,title,instruction,expected_result,suggested_command,ai_required,human_required,human_evidence_requirement) VALUES(?,?,?,?,?,?,?,0,1,'none')`,
+			`INSERT INTO check_items(check_id,project_id,sequence,title,instruction,expected_result,suggested_command,ai_required,human_required,human_evidence_requirement) VALUES(?,?,?,?,?,?,?,0,1,?)`,
 			fmt.Sprintf("%s:%d", turnID, i+1),
 			projectID,
 			i+1,
@@ -1691,6 +1700,7 @@ func applyCheckSuggestion(
 			item.Instruction,
 			item.ExpectedResult,
 			item.SuggestedCommand,
+			evidenceRequirementForCommand(item.SuggestedCommand),
 		); err != nil {
 			return err
 		}

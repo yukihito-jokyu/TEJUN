@@ -84,6 +84,19 @@ const snapshot = () => ({
     }>,
     hasPrevious: false,
   },
+  activity: undefined as
+    | undefined
+    | {
+        turnId: string;
+        phase: string;
+        items: {
+          messageId: string;
+          turnId: string;
+          role: string;
+          status: string;
+          content: { text: string }[];
+        }[];
+      },
   chats: [{ sessionId: "session", title: "現在の相談", startedAt: "2026-09-26T12:00:00Z" }],
   elicitations: [] as Array<{
     elicitationRequestId: string;
@@ -237,12 +250,155 @@ test("新規チャットを作り、過去のチャットを閲覧する", async
   await expect(page.getByText("以前の相談")).toBeVisible();
   await page.getByRole("button", { name: "新規チャット" }).click();
   await expect(page.getByText("どのような手順書を作りますか？")).toBeVisible();
-  await page.getByLabel("過去のチャット").selectOption("session");
+  await page.getByRole("combobox", { name: "過去のチャット" }).click();
+  await page.getByRole("option", { name: /現在の相談/ }).click();
   await expect(page.getByText("以前の相談")).toBeVisible();
   await expect(page.getByLabel("AIに相談する")).toHaveCount(0);
   expect(calls.find((call) => call.method === method.workspace)?.input).toMatchObject({
     newWorkspacePath: "/tmp/work",
   });
+});
+
+test("ヘッダーを表示したまま会話と準備を別々にスクロールできる", async ({ page }) => {
+  const state = snapshot();
+  state.conversation.items = Array.from({ length: 30 }, (_, index) => ({
+    messageId: `message-${index}`,
+    turnId: `turn-${index}`,
+    role: "user",
+    status: "completed",
+    content: [{ text: index === 0 ? "長い文章".repeat(100) : `相談 ${index}` }],
+  }));
+  await mockPreparation(page, state);
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto("/#/projects/p/prepare");
+
+  const messages = page.locator(".preparation-messages");
+  const details = page.locator(".preparation-details");
+  const header = page.locator(".preparation-header");
+  expect(await messages.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(
+    true,
+  );
+  expect(await messages.evaluate((element) => element.scrollWidth)).toBeLessThanOrEqual(
+    await messages.evaluate((element) => element.clientWidth),
+  );
+  expect(await details.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(
+    true,
+  );
+  await messages.evaluate((element) => (element.scrollTop = 200));
+  expect(await messages.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  expect(await details.evaluate((element) => element.scrollTop)).toBe(0);
+  await details.evaluate((element) => (element.scrollTop = 200));
+  expect(await details.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  expect(await messages.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  expect(
+    await page.evaluate(() => {
+      window.scrollTo(0, 1000);
+      return window.scrollY;
+    }),
+  ).toBe(0);
+  await expect(header).toBeInViewport();
+});
+
+test("AIの返答とツール作業を処理中に表示する", async ({ page }) => {
+  const state = snapshot();
+  await mockPreparation(page, state);
+  await page.goto("/#/projects/p/prepare");
+  await page.getByLabel("AIに相談する").fill("準備内容を調べて");
+  await page.getByRole("button", { name: "送信" }).click();
+  await expect(page.getByText("応答を準備しています…")).toBeVisible();
+
+  state.activity = {
+    turnId: "turn",
+    phase: "tool",
+    items: [
+      {
+        messageId: "tool-log",
+        turnId: "turn",
+        role: "system",
+        status: "streaming",
+        content: [{ text: "READMEを読む" }],
+      },
+    ],
+  };
+  await expect(page.getByText("ツールを実行中")).toBeVisible();
+  await expect(page.getByText("実行中：READMEを読む")).toBeVisible();
+  state.activity = {
+    ...state.activity,
+    phase: "responding",
+    items: [
+      {
+        messageId: "tool-log",
+        turnId: "turn",
+        role: "system",
+        status: "completed",
+        content: [{ text: "READMEを読む" }],
+      },
+      {
+        messageId: "progress",
+        turnId: "turn",
+        role: "agent",
+        status: "completed",
+        content: [{ text: "READMEを確認しています。" }],
+      },
+      {
+        messageId: "answer",
+        turnId: "turn",
+        role: "agent",
+        status: "streaming",
+        content: [{ text: "手順を整理しています。" }],
+      },
+    ],
+  };
+  await expect(page.getByText("AIが回答中")).toBeVisible();
+  await expect(page.getByText("完了：READMEを読む")).toBeVisible();
+  await expect(page.getByText("READMEを確認しています。")).toBeVisible();
+  await expect(page.getByText("手順を整理しています。")).toBeVisible();
+  expect(
+    await page
+      .locator(".preparation-message")
+      .filter({ hasText: "READMEを確認しています。" })
+      .count(),
+  ).toBe(1);
+  expect(
+    await page
+      .locator(".preparation-message")
+      .filter({ hasText: "手順を整理しています。" })
+      .count(),
+  ).toBe(1);
+
+  state.activity = undefined;
+  state.session.state = "ready";
+  state.conversation.items[0].status = "completed";
+  state.conversation.items.push(
+    {
+      messageId: "tool-log",
+      turnId: "turn",
+      role: "system",
+      status: "completed",
+      content: [{ text: "READMEを読む" }],
+    },
+    {
+      messageId: "progress",
+      turnId: "turn",
+      role: "agent",
+      status: "completed",
+      content: [{ text: "READMEを確認しています。" }],
+    },
+    {
+      messageId: "answer",
+      turnId: "turn",
+      role: "agent",
+      status: "completed",
+      content: [{ text: "手順を整理しました。" }],
+    },
+  );
+  await expect(page.getByText("AIが回答中")).toHaveCount(0);
+  await expect(page.getByText("完了：READMEを読む")).toBeVisible();
+  await expect(page.getByText("READMEを確認しています。")).toBeVisible();
+  await expect(page.getByText("手順を整理しました。")).toBeVisible();
+  expect(
+    await page.locator(".preparation-message").filter({ hasText: "完了：READMEを読む" }).count(),
+  ).toBe(1);
 });
 
 test("turn取消とelicitation、session設定を操作する", async ({ page }) => {

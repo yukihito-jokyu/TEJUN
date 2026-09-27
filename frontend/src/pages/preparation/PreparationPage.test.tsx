@@ -50,6 +50,44 @@ const props: PreparationPageProps = {
   onSetConfigOption: vi.fn(),
 };
 
+it("コマンドの有無で人の証跡の必須表示を切り替える", () => {
+  const onSavePlan = vi.fn();
+  render(
+    <PreparationPage
+      {...props}
+      onSavePlan={onSavePlan}
+      snapshot={{
+        ...snapshot,
+        checkPlan: {
+          ...snapshot.checkPlan,
+          items: [
+            {
+              checkId: "c",
+              sequence: 1,
+              title: "確認",
+              instruction: "実行",
+              expectedResult: "成功",
+              suggestedCommand: "",
+              aiRequired: false,
+              humanRequired: true,
+              humanEvidenceRequirement: "none",
+            },
+          ],
+        },
+      }}
+    />,
+  );
+  expect(screen.getByRole("link", { name: "一覧に戻る" }).getAttribute("href")).toBe("#/projects");
+  fireEvent.click(screen.getByRole("button", { name: "項目を編集" }));
+  expect(screen.getByText("人の証跡：任意")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("推奨コマンド"), { target: { value: "go version" } });
+  expect(screen.getByText("人の証跡：必須（テキストまたは画像）")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "チェック案を保存" }));
+  expect(onSavePlan).toHaveBeenCalledWith([
+    expect.objectContaining({ humanEvidenceRequirement: "text_or_image" }),
+  ]);
+});
+
 it("競合後の再取得でも編集中のbriefを保持する", () => {
   const view = render(<PreparationPage {...props} />);
   fireEvent.click(screen.getByRole("button", { name: "修正" }));
@@ -103,6 +141,7 @@ it("Agentの設定は作業場所の変更時だけ表示する", () => {
 });
 
 it("新規チャットと過去チャットを切り替えられる", () => {
+  Element.prototype.scrollIntoView = vi.fn();
   const onSelectChat = vi.fn();
   const onNewChat = vi.fn();
   render(
@@ -124,7 +163,8 @@ it("新規チャットと過去チャットを切り替えられる", () => {
     screen.getByText("過去のチャットを表示しています。現在のチャットを選ぶと会話を続けられます。"),
   ).toBeTruthy();
   expect(screen.queryByLabelText("AIに相談する")).toBeNull();
-  fireEvent.change(screen.getByLabelText("過去のチャット"), { target: { value: "s1" } });
+  fireEvent.keyDown(screen.getByRole("combobox", { name: "過去のチャット" }), { key: "ArrowUp" });
+  fireEvent.click(screen.getByRole("option", { name: "現在の相談（現在）" }));
   expect(onSelectChat).toHaveBeenCalledWith("");
   fireEvent.click(screen.getByRole("button", { name: "新規チャット" }));
   expect(onNewChat).toHaveBeenCalledOnce();

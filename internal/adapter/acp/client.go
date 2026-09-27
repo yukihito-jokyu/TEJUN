@@ -68,13 +68,103 @@ func (c client) SessionUpdate(ctx context.Context, notification sdk.SessionNotif
 			break
 		}
 
+		if tool := notification.Update.ToolCall; tool != nil {
+			session.activityPhase = "tool"
+			session.activityMessageID = ""
+			messageID := c.manager.newID()
+
+			session.activityTools = append(session.activityTools, application.PreparationToolActivity{
+				ID: string(tool.ToolCallId), MessageID: messageID, Title: tool.Title, Status: string(tool.Status),
+			})
+			session.activityLog = append(session.activityLog, application.ConversationItem{
+				MessageID: messageID, TurnID: session.pendingTurnID,
+				Role: "system", Status: "streaming", CreatedAt: c.manager.now(),
+				Content: []application.ContentPart{{Type: "text", Text: tool.Title}},
+			})
+
+			break
+		}
+
+		if tool := notification.Update.ToolCallUpdate; tool != nil {
+			for i := range session.activityTools {
+				if session.activityTools[i].ID != string(tool.ToolCallId) {
+					continue
+				}
+
+				logIndex := -1
+
+				for j := range session.activityLog {
+					if session.activityLog[j].MessageID == session.activityTools[i].MessageID {
+						logIndex = j
+						break
+					}
+				}
+
+				if tool.Title != nil {
+					session.activityTools[i].Title = *tool.Title
+					if logIndex >= 0 {
+						session.activityLog[logIndex].Content[0].Text = *tool.Title
+					}
+				}
+
+				if tool.Status != nil {
+					session.activityTools[i].Status = string(*tool.Status)
+					if logIndex >= 0 {
+						switch *tool.Status {
+						case sdk.ToolCallStatusCompleted:
+							session.activityLog[logIndex].Status = "completed"
+						case sdk.ToolCallStatusFailed:
+							session.activityLog[logIndex].Status = "failed"
+						}
+					}
+
+					if *tool.Status == sdk.ToolCallStatusCompleted || *tool.Status == sdk.ToolCallStatusFailed {
+						session.activityPhase = "thinking"
+						for _, active := range session.activityTools {
+							if active.Status == string(sdk.ToolCallStatusPending) ||
+								active.Status == string(sdk.ToolCallStatusInProgress) {
+								session.activityPhase = "tool"
+								break
+							}
+						}
+					}
+				}
+
+				break
+			}
+
+			break
+		}
+
 		role, chunk := "", ""
 		if update := notification.Update.AgentMessageChunk; update != nil && update.Content.Text != nil {
 			role, chunk = "agent", update.Content.Text.Text
+
+			session.activityPhase = "responding"
+
+			messageID := ""
+			if update.MessageId != nil {
+				messageID = *update.MessageId
+			}
+
+			last := len(session.activityLog) - 1
+			if last >= 0 && session.activityLog[last].Role == "agent" &&
+				(messageID == "" || messageID == session.activityMessageID) {
+				session.activityLog[last].Content[0].Text += chunk
+			} else {
+				session.activityLog = append(session.activityLog, application.ConversationItem{
+					MessageID: c.manager.newID(), TurnID: session.pendingTurnID,
+					Role: "agent", Status: "streaming", CreatedAt: c.manager.now(),
+					Content: []application.ContentPart{{Type: "text", Text: chunk}},
+				})
+			}
+
+			session.activityMessageID = messageID
 		}
 
 		if update := notification.Update.AgentThoughtChunk; update != nil && update.Content.Text != nil {
 			role, chunk = "thought", update.Content.Text.Text
+			session.activityPhase = "thinking"
 		}
 
 		if role == "" {

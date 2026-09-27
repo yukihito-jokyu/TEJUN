@@ -93,6 +93,7 @@ export interface AttachHumanEvidenceInput {
     "kind": string;
     "text"?: string;
     "sourcePath"?: string;
+    "imageData"?: string;
     "displayName"?: string;
     "operationId": string;
 }

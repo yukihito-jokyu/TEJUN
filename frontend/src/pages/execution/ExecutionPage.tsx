@@ -1,18 +1,20 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
+  ArrowLeft,
   Bot,
   CheckCircle2,
   ChevronRight,
+  Copy,
   FileText,
   LoaderCircle,
   Paperclip,
-  Send,
   Terminal,
   UserRound,
 } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
+import { Spinner } from "@/components/ui/Spinner";
 import { Textarea } from "@/components/ui/Textarea";
 import { FoldWelcomeCharacterIcon } from "@/components/icons/FoldWelcomeCharacterIcon";
 import type { ExecutionView } from "@/shared/api/wails/execution";
@@ -26,9 +28,9 @@ type Props = {
   onLoadPrevious?: () => void;
   error: string;
   onRun: () => void;
-  onMessage: (text: string) => Promise<boolean>;
   onHumanCheck: (checkId: string, checked: boolean) => void;
   onEvidence: (checkId: string, kind: string, text: string, path: string) => Promise<boolean>;
+  onImageEvidence?: (checkId: string, file: File) => Promise<boolean>;
   onPermission: (sessionId: string, id: string, optionId: string) => void;
   onGenerate: () => void;
 };
@@ -41,16 +43,25 @@ export function ExecutionPage({
   onLoadPrevious,
   error,
   onRun,
-  onMessage,
   onHumanCheck,
   onEvidence,
+  onImageEvidence,
   onPermission,
   onGenerate,
 }: Props) {
-  const [message, setMessage] = useState("");
   const [evidence, setEvidence] = useState<Record<string, string>>({});
   const [paths, setPaths] = useState<Record<string, string>>({});
   const [editingEvidence, setEditingEvidence] = useState<string | null>(null);
+  const [copiedCheckId, setCopiedCheckId] = useState<string | null>(null);
+  const [copyErrorCheckId, setCopyErrorCheckId] = useState<string | null>(null);
+  const [imageErrorCheckId, setImageErrorCheckId] = useState<string | null>(null);
+  const messagesRef = useRef<HTMLDivElement>(null);
+  const followMessages = useRef(true);
+  useEffect(() => {
+    if (followMessages.current && messagesRef.current) {
+      messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
+    }
+  }, [view?.conversation.items, view?.activity?.items]);
   const required =
     view?.checks.reduce(
       (count, check) => count + Number(check.ai.required) + Number(check.human.required),
@@ -77,9 +88,28 @@ export function ExecutionPage({
     const timer = window.setInterval(update, 1000);
     return () => window.clearInterval(timer);
   }, [view?.activeRun?.startedAt]);
-  const runnable = view?.checks.some(
-    (check) => check.ai.status === "pending" || check.ai.status === "failed",
+  const runnable = view?.checks.some((check) =>
+    ["pending", "failed", "not_required"].includes(check.ai.status),
   );
+  const runCompleted =
+    view?.activeRun?.targetedCheckIds.filter((id) =>
+      view.checks.some(
+        (check) => check.checkId === id && ["completed", "failed"].includes(check.ai.status),
+      ),
+    ).length ?? 0;
+  const visibleMessages = [...(view?.conversation.items ?? []), ...(view?.activity?.items ?? [])];
+  const addImage = (checkId: string, file: File) => {
+    if (
+      !onImageEvidence ||
+      !["image/png", "image/jpeg"].includes(file.type) ||
+      file.size > 25 * 1024 * 1024
+    ) {
+      setImageErrorCheckId(checkId);
+      return;
+    }
+    setImageErrorCheckId(null);
+    void onImageEvidence(checkId, file).catch(() => setImageErrorCheckId(checkId));
+  };
 
   return (
     <main className="execution-page" aria-label="動作チェック">
@@ -93,19 +123,27 @@ export function ExecutionPage({
           </strong>
           <p className="execution-eyebrow">{view?.project.name ?? "手順書"} / 動作チェック</p>
         </div>
-        <nav className="execution-steps" aria-label="作成工程">
-          <span>
-            <b>1</b> 準備
-          </span>
-          <ChevronRight size={15} />
-          <span className="active" aria-current="step">
-            <b>2</b> 動作チェック
-          </span>
-          <ChevronRight size={15} />
-          <span>
-            <b>3</b> 手順書
-          </span>
-        </nav>
+        <div className="execution-header-actions">
+          <nav className="execution-steps" aria-label="作成工程">
+            <span>
+              <b>1</b> 準備
+            </span>
+            <ChevronRight size={15} />
+            <span className="active" aria-current="step">
+              <b>2</b> 動作チェック
+            </span>
+            <ChevronRight size={15} />
+            <span>
+              <b>3</b> 手順書
+            </span>
+          </nav>
+          <Button asChild variant="outline" size="sm">
+            <a href="#/projects">
+              <ArrowLeft size={16} aria-hidden="true" />
+              一覧に戻る
+            </a>
+          </Button>
+        </div>
       </header>
       {error && (
         <Alert variant="destructive" role="alert" className="execution-error">
@@ -150,19 +188,28 @@ export function ExecutionPage({
                 </p>
               </div>
             </div>
-            <div className="execution-thread" aria-live="polite">
+            <div
+              className="execution-thread"
+              aria-live="polite"
+              ref={messagesRef}
+              onScroll={(event) => {
+                const target = event.currentTarget;
+                followMessages.current =
+                  target.scrollHeight - target.scrollTop - target.clientHeight < 48;
+              }}
+            >
               {view.conversation.hasPrevious && (
                 <Button variant="ghost" size="sm" disabled={loadingOlder} onClick={onLoadPrevious}>
                   以前の会話を読み込む
                 </Button>
               )}
-              {view.conversation.items.length === 0 && (
+              {visibleMessages.length === 0 && (
                 <p className="execution-chat-empty">
                   AIへの確認依頼や実行結果がここに表示されます。
                 </p>
               )}
               <ol className="execution-messages">
-                {view.conversation.items.map((item) => (
+                {visibleMessages.map((item) => (
                   <li
                     key={item.messageId}
                     className={
@@ -170,19 +217,57 @@ export function ExecutionPage({
                     }
                   >
                     <span className="execution-avatar" aria-hidden="true">
-                      {item.role === "user" ? <UserRound size={16} /> : <Bot size={16} />}
+                      {item.role === "user" ? (
+                        <UserRound size={16} />
+                      ) : item.role === "system" ? (
+                        <Terminal size={16} />
+                      ) : (
+                        <Bot size={16} />
+                      )}
                     </span>
                     <div>
-                      <span className="sr-only">{item.role === "user" ? "あなた" : "AI"}</span>
+                      <span className="sr-only">
+                        {item.role === "user"
+                          ? "あなた"
+                          : item.role === "agent"
+                            ? "AI"
+                            : "システム"}
+                      </span>
                       <p>
+                        {item.role === "system" &&
+                          (item.status === "failed"
+                            ? "失敗："
+                            : item.status === "completed"
+                              ? "完了："
+                              : "実行中：")}
                         {item.content
-                          .map((part) => part.text || part.name || part.url)
+                          .map((part) => part.text ?? part.name ?? part.url ?? "添付")
                           .filter(Boolean)
                           .join("\n")}
                       </p>
+                      {item.role !== "system" && item.status !== "completed" && (
+                        <small>{item.status}</small>
+                      )}
                     </div>
                   </li>
                 ))}
+                {view.activeRun && ["queued", "running"].includes(view.activeRun.status) && (
+                  <li className="execution-message">
+                    <span className="execution-avatar" aria-hidden="true">
+                      <Bot size={16} />
+                    </span>
+                    <div>
+                      <p className="execution-activity-status">
+                        <Spinner aria-hidden="true" role="presentation" />
+                        {view.activity?.phase === "tool"
+                          ? "ツールを実行中"
+                          : view.activity?.phase === "responding"
+                            ? "AIが回答中"
+                            : "AIが内容を確認中"}
+                      </p>
+                    </div>
+                  </li>
+                )}
               </ol>
               {view.pendingPermissions
                 .filter((item) => item.status === "pending")
@@ -213,37 +298,11 @@ export function ExecutionPage({
                   </section>
                 ))}
             </div>
-            <form
-              className="execution-composer"
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (!message.trim() || busy) return;
-                const sent = message.trim();
-                void onMessage(sent)
-                  .then((ok) => {
-                    if (ok) setMessage((current) => (current.trim() === sent ? "" : current));
-                  })
-                  .catch(() => undefined);
-              }}
-            >
-              <label className="sr-only" htmlFor="execution-message">
-                AIにメッセージを送る
-              </label>
-              <Textarea
-                id="execution-message"
-                placeholder="AIに追加の確認を依頼…"
-                value={message}
-                onChange={(event) => setMessage(event.target.value)}
-              />
-              <Button
-                type="submit"
-                size="icon"
-                aria-label="送信"
-                disabled={busy || !message.trim()}
-              >
-                <Send size={17} />
+            <div className="execution-composer">
+              <Button disabled={busy || !!view.activeRun || !runnable} onClick={onRun}>
+                AIチェックを実行
               </Button>
-            </form>
+            </div>
           </aside>
 
           <section className="execution-workspace" aria-label="チェック項目">
@@ -299,7 +358,7 @@ export function ExecutionPage({
                     {running ? "AIチェックを実行中です" : "AIチェックの開始を待っています"}
                   </strong>
                   <p>
-                    {view.activeRun.targetedCheckIds?.length ?? 0}件を確認中 · 経過時間{" "}
+                    {runCompleted} / {view.activeRun.targetedCheckIds.length}件を確認 · 経過時間{" "}
                     {Math.floor(elapsedSeconds / 60)}分{elapsedSeconds % 60}秒
                   </p>
                   <small>AIの結果は処理が終わると各項目に反映されます。</small>
@@ -314,6 +373,11 @@ export function ExecutionPage({
                 const needsEvidence =
                   check.humanEvidenceRequirement !== "" &&
                   check.humanEvidenceRequirement !== "none";
+                const hasEvidence = check.evidence.human.some((item) =>
+                  check.humanEvidenceRequirement === "text_or_image"
+                    ? item.kind === "text" || item.kind === "image"
+                    : item.kind === check.humanEvidenceRequirement,
+                );
                 const waitingForAI = check.ai.required && !check.ai.checked;
                 return (
                   <li key={check.checkId} className="execution-step-card">
@@ -324,6 +388,39 @@ export function ExecutionPage({
                       </h3>
                       <p>{check.instruction}</p>
                       <small>期待結果：{check.expectedResult}</small>
+                      {check.suggestedCommand && (
+                        <div className="execution-step-command">
+                          <code>{check.suggestedCommand}</code>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`${check.sequence}番のコマンドをコピー`}
+                            title="コマンドをコピー"
+                            onClick={() => {
+                              if (!navigator.clipboard) {
+                                setCopyErrorCheckId(check.checkId);
+                                return;
+                              }
+                              void navigator.clipboard.writeText(check.suggestedCommand).then(
+                                () => {
+                                  setCopiedCheckId(check.checkId);
+                                  setCopyErrorCheckId(null);
+                                },
+                                () => setCopyErrorCheckId(check.checkId),
+                              );
+                            }}
+                          >
+                            {copiedCheckId === check.checkId ? (
+                              <CheckCircle2 size={16} />
+                            ) : (
+                              <Copy size={16} />
+                            )}
+                          </Button>
+                          {copyErrorCheckId === check.checkId && (
+                            <span role="alert">コピーできませんでした</span>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div className="execution-check-columns">
                       <section
@@ -343,7 +440,7 @@ export function ExecutionPage({
                           <span
                             className={"execution-pill " + (check.ai.checked ? "is-success" : "")}
                           >
-                            {!check.ai.required && check.ai.status === "pending"
+                            {!check.ai.required && check.ai.status === "not_required"
                               ? "任意"
                               : checkStatus(check.ai.status)}
                           </span>
@@ -351,19 +448,21 @@ export function ExecutionPage({
                         {check.ai.failureSummary && (
                           <p className="execution-side-error">{check.ai.failureSummary}</p>
                         )}
-                        <div className="execution-evidence-summary">
-                          <FileText size={16} />
-                          <div>
-                            <span>証跡</span>
-                            {check.evidence.ai.length ? (
-                              check.evidence.ai.map((item) => (
-                                <Evidence key={item.evidenceId} item={item} />
-                              ))
-                            ) : (
-                              <p>AIの実行結果を待っています</p>
-                            )}
+                        {check.ai.status !== "failed" && (
+                          <div className="execution-evidence-summary">
+                            <FileText size={16} />
+                            <div>
+                              <span>証跡</span>
+                              {check.evidence.ai.length ? (
+                                check.evidence.ai.map((item) => (
+                                  <Evidence key={item.evidenceId} item={item} />
+                                ))
+                              ) : (
+                                <p>AIの実行結果を待っています</p>
+                              )}
+                            </div>
                           </div>
-                        </div>
+                        )}
                       </section>
                       <section
                         className="execution-check-side is-human"
@@ -373,7 +472,12 @@ export function ExecutionPage({
                           <input
                             type="checkbox"
                             checked={check.human.checked}
-                            disabled={busy || !check.human.required || waitingForAI}
+                            disabled={
+                              busy ||
+                              !check.human.required ||
+                              waitingForAI ||
+                              (needsEvidence && !hasEvidence)
+                            }
                             aria-label="確認済み"
                             onChange={(event) => onHumanCheck(check.checkId, event.target.checked)}
                           />
@@ -388,7 +492,7 @@ export function ExecutionPage({
                               ? "対象外"
                               : check.human.checked
                                 ? "完了"
-                                : needsEvidence && check.evidence.human.length === 0
+                                : needsEvidence && !hasEvidence
                                   ? "証跡が必要"
                                   : "未確認"}
                           </span>
@@ -425,7 +529,29 @@ export function ExecutionPage({
                           </Button>
                         )}
                         {editingEvidence === check.checkId && (
-                          <div className="execution-evidence-editor">
+                          <div
+                            className="execution-evidence-editor"
+                            role="group"
+                            aria-label={check.title + "の証跡入力"}
+                            tabIndex={0}
+                            onPaste={(event) => {
+                              const file = Array.from(event.clipboardData.items)
+                                .map((item) => item.getAsFile())
+                                .find((item) => item?.type.startsWith("image/"));
+                              if (file) {
+                                event.preventDefault();
+                                addImage(check.checkId, file);
+                              }
+                            }}
+                            onDragOver={(event) => event.preventDefault()}
+                            onDrop={(event) => {
+                              event.preventDefault();
+                              const file = Array.from(event.dataTransfer.files).find((item) =>
+                                item.type.startsWith("image/"),
+                              );
+                              if (file) addImage(check.checkId, file);
+                            }}
+                          >
                             <label htmlFor={"evidence-" + check.checkId}>テキスト証跡</label>
                             <Textarea
                               id={"evidence-" + check.checkId}
@@ -486,6 +612,25 @@ export function ExecutionPage({
                             >
                               画像を添付
                             </Button>
+                            <label htmlFor={"image-file-" + check.checkId}>
+                              画像ファイルを選択
+                            </label>
+                            <input
+                              id={"image-file-" + check.checkId}
+                              type="file"
+                              accept="image/png,image/jpeg"
+                              onChange={(event) => {
+                                const file = event.currentTarget.files?.[0];
+                                if (file) addImage(check.checkId, file);
+                                event.currentTarget.value = "";
+                              }}
+                            />
+                            <p>
+                              画像はここにドラッグ＆ドロップ、またはCtrl+V / ⌘Vで貼り付けできます。
+                            </p>
+                            {imageErrorCheckId === check.checkId && (
+                              <p role="alert">PNGまたはJPEGの画像（25MB以下）を選んでください。</p>
+                            )}
                           </div>
                         )}
                       </section>
@@ -519,13 +664,6 @@ export function ExecutionPage({
               </div>
               <div className="execution-footer-actions">
                 <Button
-                  variant="secondary"
-                  disabled={busy || !!view.activeRun || !runnable}
-                  onClick={onRun}
-                >
-                  AIチェックを実行
-                </Button>
-                <Button
                   disabled={busy || !view.readiness.canGenerateProcedure}
                   onClick={onGenerate}
                 >
@@ -543,10 +681,16 @@ export function ExecutionPage({
 function Evidence({ item }: { item: ExecutionView["checks"][number]["evidence"]["ai"][number] }) {
   return (
     <figure className="execution-evidence-item">
-      {item.previewUrl && item.kind === "image" && (
-        <img src={item.previewUrl} alt={item.displayName || "証跡画像"} />
+      {item.kind === "text" ? (
+        <p>{item.text}</p>
+      ) : (
+        <>
+          {item.previewUrl && item.kind === "image" && (
+            <img src={item.previewUrl} alt={item.displayName || "証跡画像"} />
+          )}
+          <figcaption>{item.displayName || item.kind}</figcaption>
+        </>
       )}
-      <figcaption>{item.displayName || item.kind}</figcaption>
     </figure>
   );
 }

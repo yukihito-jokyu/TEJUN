@@ -58,6 +58,11 @@ export type PreparationView = {
     hasPrevious: boolean;
     previousCursor?: number;
   };
+  activity?: {
+    turnId: string;
+    phase: string;
+    items: PreparationView["conversation"]["items"];
+  };
   chats?: { sessionId: string; title: string; startedAt: string }[];
   elicitations: {
     elicitationRequestId: string;
@@ -100,6 +105,15 @@ export async function getPreparation(
         content: nonNull(item.content),
       })),
     },
+    activity: view.activity
+      ? {
+          ...view.activity,
+          items: nonNull(view.activity.items).map((item) => ({
+            ...item,
+            content: nonNull(item.content),
+          })),
+        }
+      : undefined,
     chats: nonNull(view.chats),
     elicitations: nonNull(view.elicitations).map((item) => ({
       ...item,
