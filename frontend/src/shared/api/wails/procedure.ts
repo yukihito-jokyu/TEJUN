@@ -228,11 +228,14 @@ export async function exportCompletedProcedure(
   });
   if (!path) return false;
   const procedureId = view.procedure.procedureId;
-  const prepared = await ProcedureService.PrepareExportProcedure({
-    procedureId,
-    procedureRevision: revision,
-    absolutePath: path,
-  });
+  const prepared = await prepareExportDestination(path, () =>
+    ProcedureService.PrepareExportProcedure({
+      procedureId,
+      procedureRevision: revision,
+      absolutePath: path,
+    }),
+  );
+  if (!prepared) return false;
   if (
     prepared.overwriteRequired &&
     !window.confirm(`既存ファイル ${prepared.destinationDisplayName} を置き換えますか？`)
@@ -256,3 +259,4 @@ import {
 } from "../../../../bindings/github.com/yukihito-jokyu/TEJUN/internal/adapter/wails";
 import type { ProcedureEvidenceDetail } from "../../../../bindings/github.com/yukihito-jokyu/TEJUN/internal/adapter/wails/models";
 import type { ProcedureView as GeneratedProcedureView } from "../../../../bindings/github.com/yukihito-jokyu/TEJUN/internal/application/models";
+import { prepareExportDestination } from "./ExportDestination";

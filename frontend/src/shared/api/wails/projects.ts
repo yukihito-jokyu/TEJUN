@@ -5,6 +5,7 @@ import type {
   ProjectSummary as GeneratedProjectSummary,
   PreparedExportProcedure,
 } from "../../../../bindings/github.com/yukihito-jokyu/TEJUN/internal/adapter/wails/models";
+import { prepareExportDestination } from "./ExportDestination";
 
 export type ProjectSummary = GeneratedProjectSummary;
 export type ProjectFilter = "all" | "active" | "complete";
@@ -105,7 +106,9 @@ export function createRevision(
 }
 
 export async function chooseExportDestination(source: ProjectSummary, format: "markdown" | "pdf") {
-  if (!source.currentProcedureId || source.currentProcedureRevision == null)
+  const procedureId = source.currentProcedureId;
+  const procedureRevision = source.currentProcedureRevision;
+  if (!procedureId || procedureRevision == null)
     throw new Error("完成版の手順書情報を取得できません。再読み込みしてください");
   const extension = format === "pdf" ? "pdf" : "md";
   const path = await Dialogs.SaveFile({
@@ -114,11 +117,9 @@ export async function chooseExportDestination(source: ProjectSummary, format: "m
     Filters: [{ DisplayName: format === "pdf" ? "PDF" : "Markdown", Pattern: `*.${extension}` }],
   });
   if (!path) return null;
-  return ProjectService.PrepareExportProcedure({
-    procedureId: source.currentProcedureId,
-    procedureRevision: source.currentProcedureRevision,
-    absolutePath: path,
-  });
+  return prepareExportDestination(path, () =>
+    ProjectService.PrepareExportProcedure({ procedureId, procedureRevision, absolutePath: path }),
+  );
 }
 
 export function exportProcedure(
