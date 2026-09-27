@@ -107,8 +107,8 @@ func TestOpenAppliesMigrationsAndPragmas(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if version != 8 {
-				t.Fatalf("version=%d, want 8", version)
+			if version != 9 {
+				t.Fatalf("version=%d, want 9", version)
 			}
 
 			assertPragmasOnTwoConnections(t, db)
@@ -184,5 +184,42 @@ func assertForeignKeyConstraint(t *testing.T, db *sql.DB) {
 
 	if _, err := db.Exec("INSERT INTO child(parent_id) VALUES (1)"); err == nil {
 		t.Fatal("foreign key violation was accepted")
+	}
+}
+
+func TestOpenUpgradesExistingExecution(t *testing.T) {
+	ctx, db, _ := seededPreparation(t)
+
+	migrationFS, err := fs.Sub(migrations, "migration")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	provider, err := goose.NewProvider(goose.DialectSQLite3, db, migrationFS, goose.WithLogger(goose.NopLogger()))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := provider.Down(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := db.ExecContext(ctx, `INSERT INTO executions(execution_id, project_id, session_id, revision, started_at)
+VALUES ('legacy', 'p', 's', 1, '')`); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := provider.Up(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	var status, startedAt string
+	if err := db.QueryRowContext(ctx, `SELECT status, started_at FROM executions WHERE execution_id = 'legacy'`).
+		Scan(&status, &startedAt); err != nil {
+		t.Fatal(err)
+	}
+
+	if status != "active" || startedAt == "" {
+		t.Fatalf("status=%q started_at=%q", status, startedAt)
 	}
 }
