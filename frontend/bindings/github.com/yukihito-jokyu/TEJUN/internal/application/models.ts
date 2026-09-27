@@ -106,6 +106,7 @@ export interface EvidenceSummary {
     "evidenceId": string;
     "actor": string;
     "kind": string;
+    "text": string;
     "displayName": string;
     "mimeType": string;
     "size": number;
@@ -119,6 +120,7 @@ export interface ExecutionCheckView {
     "title": string;
     "instruction": string;
     "expectedResult": string;
+    "suggestedCommand": string;
     "ai": CheckSideView;
     "human": CheckSideView;
     "humanEvidenceRequirement": string;
@@ -156,6 +158,7 @@ export interface ExecutionView {
     "checks": ExecutionCheckView[] | null;
     "pendingPermissions": PermissionRequestView[] | null;
     "conversation": ConversationPage;
+    "activity": PreparationActivity | null;
     "readiness": ExecutionReadiness;
     "changeSequence": number;
 }
@@ -169,6 +172,12 @@ export interface PermissionRequestView {
     "status": string;
     "requestedAt": string;
     "expiresAt": string | null;
+}
+
+export interface PreparationActivity {
+    "turnId": string;
+    "phase": string;
+    "items": ConversationItem[] | null;
 }
 
 export interface PreparationBrief {
@@ -199,6 +208,7 @@ export interface PreparationView {
     "checkPlan": CheckPlanView;
     "session": SessionSummary | null;
     "conversation": ConversationPage;
+    "activity"?: PreparationActivity | null;
     "chats": PreparationChat[] | null;
     "elicitations": ElicitationRequestView[] | null;
     "readiness": Readiness;
