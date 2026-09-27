@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Bot,
+  ArrowLeft,
   Check,
   ChevronRight,
   Folder,
@@ -15,7 +16,15 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/Select";
 import { Textarea } from "@/components/ui/Textarea";
+import { Spinner } from "@/components/ui/Spinner";
 import { FoldWelcomeCharacterIcon } from "@/components/icons/FoldWelcomeCharacterIcon";
 import type { PreparationView, CheckItemInput } from "@/shared/api/wails/preparation";
 import "./PreparationPage.css";
@@ -73,9 +82,16 @@ export function PreparationPage(props: PreparationPageProps) {
   const [editor, setEditor] = useState<"brief" | "workspace" | "plan" | null>(null);
   const workspaceTrigger = useRef<HTMLButtonElement>(null);
   const workspaceConfirmButton = useRef<HTMLButtonElement>(null);
+  const messagesRef = useRef<HTMLOListElement>(null);
+  const followMessages = useRef(true);
   useEffect(() => {
     if (workspaceConfirm) workspaceConfirmButton.current?.focus();
   }, [workspaceConfirm]);
+  useEffect(() => {
+    if (followMessages.current && messagesRef.current) {
+      messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
+    }
+  }, [snapshot?.activity?.items, snapshot?.conversation.items]);
   const [dirty, setDirty] = useState({
     brief: false,
     plan: false,
@@ -117,6 +133,15 @@ export function PreparationPage(props: PreparationPageProps) {
   const session = snapshot.session;
   const pending = busy !== undefined;
   const viewingPastChat = !!props.selectedChatId && props.selectedChatId !== session?.sessionId;
+  const waitingForAgent =
+    !viewingPastChat &&
+    snapshot.conversation.items.some(
+      (item) => item.role === "user" && (item.status === "pending" || item.status === "streaming"),
+    );
+  const visibleMessages = [
+    ...snapshot.conversation.items,
+    ...(waitingForAgent ? (snapshot.activity?.items ?? []) : []),
+  ];
   return (
     <main className="preparation-page" aria-labelledby="preparation-title">
       <header className="preparation-header">
@@ -129,19 +154,27 @@ export function PreparationPage(props: PreparationPageProps) {
           </strong>
           <p className="preparation-eyebrow">{snapshot.project.name} / 準備</p>
         </div>
-        <nav className="preparation-steps" aria-label="作成工程">
-          <span className="active">
-            <b>1</b> 準備
-          </span>
-          <ChevronRight size={15} />
-          <span>
-            <b>2</b> 動作チェック
-          </span>
-          <ChevronRight size={15} />
-          <span>
-            <b>3</b> 手順書
-          </span>
-        </nav>
+        <div className="preparation-header-actions">
+          <nav className="preparation-steps" aria-label="作成工程">
+            <span className="active">
+              <b>1</b> 準備
+            </span>
+            <ChevronRight size={15} />
+            <span>
+              <b>2</b> 動作チェック
+            </span>
+            <ChevronRight size={15} />
+            <span>
+              <b>3</b> 手順書
+            </span>
+          </nav>
+          <Button asChild variant="outline" size="sm">
+            <a href="#/projects">
+              <ArrowLeft size={16} aria-hidden="true" />
+              一覧に戻る
+            </a>
+          </Button>
+        </div>
       </header>
       {error && (
         <Alert variant="destructive" role="alert">
@@ -179,32 +212,30 @@ export function PreparationPage(props: PreparationPageProps) {
             会話
           </h2>
           <div className="preparation-chat-navigation">
-            <label htmlFor="preparation-chat-history" className="sr-only">
-              過去のチャット
-            </label>
-            <select
-              id="preparation-chat-history"
+            <Select
               value={props.selectedChatId || session?.sessionId || ""}
-              onChange={(event) =>
-                props.onSelectChat?.(
-                  event.target.value === session?.sessionId ? "" : event.target.value,
-                )
+              onValueChange={(value) =>
+                props.onSelectChat?.(value === session?.sessionId ? "" : value)
               }
             >
-              {!session && <option value="">まだチャットがありません</option>}
-              {(snapshot.chats?.length
-                ? snapshot.chats
-                : session
-                  ? [{ sessionId: session.sessionId, title: "現在のチャット", startedAt: "" }]
-                  : []
-              ).map((chat) => (
-                <option key={chat.sessionId} value={chat.sessionId}>
-                  {chat.title}
-                  {chat.sessionId === session?.sessionId ? "（現在）" : ""}
-                  {chat.startedAt ? ` · ${new Date(chat.startedAt).toLocaleString("ja-JP")}` : ""}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger aria-label="過去のチャット" className="preparation-chat-select">
+                <SelectValue placeholder="まだチャットがありません" />
+              </SelectTrigger>
+              <SelectContent>
+                {(snapshot.chats?.length
+                  ? snapshot.chats
+                  : session
+                    ? [{ sessionId: session.sessionId, title: "現在のチャット", startedAt: "" }]
+                    : []
+                ).map((chat) => (
+                  <SelectItem key={chat.sessionId} value={chat.sessionId}>
+                    {chat.title}
+                    {chat.sessionId === session?.sessionId ? "（現在）" : ""}
+                    {chat.startedAt ? ` · ${new Date(chat.startedAt).toLocaleString("ja-JP")}` : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Button
               type="button"
               variant="outline"
@@ -215,7 +246,15 @@ export function PreparationPage(props: PreparationPageProps) {
               新規チャット
             </Button>
           </div>
-          <ol className="preparation-messages" aria-live="polite">
+          <ol
+            ref={messagesRef}
+            className="preparation-messages"
+            aria-live="polite"
+            onScroll={(event) => {
+              const list = event.currentTarget;
+              followMessages.current = list.scrollHeight - list.clientHeight - list.scrollTop < 40;
+            }}
+          >
             {snapshot.conversation.hasPrevious && (
               <li>
                 <Button type="button" variant="ghost" size="sm" onClick={props.onLoadPrevious}>
@@ -223,13 +262,19 @@ export function PreparationPage(props: PreparationPageProps) {
                 </Button>
               </li>
             )}
-            {snapshot.conversation.items.map((item) => (
+            {visibleMessages.map((item) => (
               <li
                 key={item.messageId}
                 className={`preparation-message preparation-message-${item.role}`}
               >
                 <span className="preparation-avatar">
-                  {item.role === "user" ? <UserRound size={16} /> : <Bot size={16} />}
+                  {item.role === "user" ? (
+                    <UserRound size={16} />
+                  ) : item.role === "system" ? (
+                    <Terminal size={16} />
+                  ) : (
+                    <Bot size={16} />
+                  )}
                 </span>
                 <div>
                   <span className="sr-only">
@@ -242,14 +287,45 @@ export function PreparationPage(props: PreparationPageProps) {
                           : "システム"}
                   </span>
                   <p>
+                    {item.role === "system" &&
+                      (item.status === "completed"
+                        ? "完了："
+                        : item.status === "failed"
+                          ? "失敗："
+                          : item.status === "interrupted"
+                            ? "中断："
+                            : "実行中：")}
                     {item.content
                       .map((part) => part.text ?? part.name ?? part.url ?? "添付")
                       .join("\n")}
                   </p>
-                  {item.status !== "completed" && <small>{item.status}</small>}
+                  {item.role !== "system" && item.status !== "completed" && (
+                    <small>{item.status}</small>
+                  )}
                 </div>
               </li>
             ))}
+            {waitingForAgent && (
+              <li
+                className="preparation-message preparation-message-agent preparation-activity"
+                role="status"
+              >
+                <span className="preparation-avatar">
+                  <Bot size={16} />
+                </span>
+                <div>
+                  <p className="preparation-activity-status">
+                    <Spinner aria-hidden="true" />
+                    {snapshot.activity?.phase === "tool"
+                      ? "ツールを実行中"
+                      : snapshot.activity?.phase === "responding"
+                        ? "AIが回答中"
+                        : "AIが内容を整理中"}
+                  </p>
+                  {!snapshot.activity?.items.length && <p>応答を準備しています…</p>}
+                </div>
+              </li>
+            )}
             {snapshot.conversation.items.length === 0 && (
               <li className="preparation-message preparation-message-agent">
                 <span className="preparation-avatar">
@@ -744,7 +820,13 @@ export function PreparationPage(props: PreparationPageProps) {
                             setItems((current) =>
                               current.map((entry, i) =>
                                 i === index
-                                  ? { ...entry, suggestedCommand: event.target.value }
+                                  ? {
+                                      ...entry,
+                                      suggestedCommand: event.target.value,
+                                      humanEvidenceRequirement: event.target.value.trim()
+                                        ? "text_or_image"
+                                        : "none",
+                                    }
                                   : entry,
                               ),
                             );
@@ -786,27 +868,10 @@ export function PreparationPage(props: PreparationPageProps) {
                         />{" "}
                         人による確認
                       </label>
-                      <label>
-                        人の証跡
-                        <select
-                          value={item.humanEvidenceRequirement}
-                          onChange={(event) => {
-                            setItems((current) =>
-                              current.map((entry, i) =>
-                                i === index
-                                  ? { ...entry, humanEvidenceRequirement: event.target.value }
-                                  : entry,
-                              ),
-                            );
-                            setDirty((value) => ({ ...value, plan: true }));
-                          }}
-                        >
-                          <option value="none">不要</option>
-                          <option value="text">テキスト</option>
-                          <option value="image">画像</option>
-                          <option value="text_or_image">テキストまたは画像</option>
-                        </select>
-                      </label>
+                      <p>
+                        人の証跡：
+                        {item.suggestedCommand?.trim() ? "必須（テキストまたは画像）" : "任意"}
+                      </p>
                       <div className="preparation-actions">
                         <Button
                           variant="ghost"

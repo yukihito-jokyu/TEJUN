@@ -59,6 +59,30 @@ export function PreparationRoute() {
     });
   }, [refresh]);
 
+  useEffect(() => {
+    if (
+      (selectedChatId && selectedChatId !== snapshot?.session?.sessionId) ||
+      !snapshot?.conversation.items.some(
+        (item) => item.status === "pending" || item.status === "streaming",
+      )
+    )
+      return;
+
+    let active = true;
+    const poll = () => {
+      void refresh()
+        .catch(() => undefined)
+        .finally(() => {
+          if (active) timer = window.setTimeout(poll, 500);
+        });
+    };
+    let timer = window.setTimeout(poll, 500);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [refresh, selectedChatId, snapshot]);
+
   const run = useCallback(
     async (
       action: Action,
