@@ -70,15 +70,21 @@ func TestPDFEvidenceImage(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		read    func(string, string) ([]byte, error)
+		read    func(string, string) (EvidenceContent, error)
 		wantErr bool
 	}{
-		{"available", func(procedure, evidence string) ([]byte, error) {
+		{"available", func(procedure, evidence string) (EvidenceContent, error) {
 			if procedure != "procedure" || evidence != "evidence" {
 				t.Fatal("wrong relation")
 			}
 
-			return encoded.Bytes(), nil
+			return EvidenceContent{Kind: "image", Data: encoded.Bytes()}, nil
+		}, false},
+		{"corrupt image", func(string, string) (EvidenceContent, error) {
+			return EvidenceContent{Kind: "image", Data: []byte("broken")}, nil
+		}, true},
+		{"included text", func(string, string) (EvidenceContent, error) {
+			return EvidenceContent{Kind: "text", Data: []byte("observed")}, nil
 		}, false},
 		{"missing", nil, true},
 	}
@@ -91,8 +97,34 @@ func TestPDFEvidenceImage(t *testing.T) {
 				t.Fatalf("error = %v", err)
 			}
 
-			if !test.wantErr && !bytes.Contains(output.Bytes(), []byte("/Subtype /Image")) {
+			if !test.wantErr && test.name == "available" && !bytes.Contains(output.Bytes(), []byte("/Subtype /Image")) {
 				t.Fatal("PDF does not contain an image")
+			}
+		})
+	}
+}
+
+func TestPDFEvidenceTextLimit(t *testing.T) {
+	document := []byte(
+		`{"title":"手順","steps":[{"title":"確認","evidenceRefs":[{"evidenceId":"evidence","included":true}]}]}`,
+	)
+
+	for _, test := range []struct {
+		name      string
+		size      int
+		wantError bool
+	}{
+		{name: "at limit", size: 64 << 10},
+		{name: "over limit", size: 64<<10 + 1, wantError: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var output bytes.Buffer
+
+			err := RenderWithEvidence("pdf", document, "procedure", func(string, string) (EvidenceContent, error) {
+				return EvidenceContent{Kind: "text", Data: bytes.Repeat([]byte("a"), test.size)}, nil
+			}, &output)
+			if (err != nil) != test.wantError {
+				t.Fatalf("error = %v", err)
 			}
 		})
 	}

@@ -77,13 +77,17 @@ func TestExportPreservesExistingOutput(t *testing.T) {
 				OverwriteIdentity:  identity,
 			}
 
-			err = exporter.Export(context.Background(), job, func(string) error {
-				if test.markFails {
-					return errors.New("DB commit failed")
-				}
+			err = exporter.Export(
+				context.Background(),
+				job,
+				func(string) error {
+					if test.markFails {
+						return errors.New("DB commit failed")
+					}
 
-				return nil
-			})
+					return nil
+				},
+			)
 			if (err != nil) != test.wantError {
 				t.Fatalf("Export error = %v, wantError %t", err, test.wantError)
 			}
@@ -140,6 +144,83 @@ func TestPreparedSelectionValidation(t *testing.T) {
 			_, err = exporter.VerifyPrepared(selection, test.procedureID, test.revision)
 			if (err != nil) != test.wantError {
 				t.Fatalf("VerifyPrepared error = %v, wantError %t", err, test.wantError)
+			}
+		})
+	}
+}
+
+func TestExportRecoveryRevalidatesDestination(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		swapParent bool
+	}{
+		{name: "parent changed", swapParent: true},
+		{name: "overwrite changed"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			base := t.TempDir()
+			first := filepath.Join(base, "first")
+			second := filepath.Join(base, "second")
+
+			for _, dir := range []string{first, second} {
+				if err := os.Mkdir(dir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			link := filepath.Join(base, "selected")
+			if err := os.Symlink(first, link); err != nil {
+				t.Fatal(err)
+			}
+
+			path := filepath.Join(link, "procedure.md")
+			if !test.swapParent {
+				if err := os.WriteFile(path, []byte("original"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			before := NewExporter()
+
+			selection, identity, err := before.Verify(path, "procedure", 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if err := before.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			if test.swapParent {
+				if err := os.Remove(link); err != nil {
+					t.Fatal(err)
+				}
+
+				if err := os.Symlink(second, link); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(path, []byte("changed"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			after := NewExporter()
+			defer func() { _ = after.Close() }()
+
+			err = after.Export(context.Background(), application.ClaimedProjectJob{
+				Kind: "export", Format: "markdown", ProcedureID: "procedure", ProcedureRevision: 1,
+				DocumentJSON: []byte(`{"title":"new","steps":[]}`), Destination: selection,
+				OverwriteConfirmed: identity != nil, OverwriteIdentity: identity,
+			}, func(string) error { return nil })
+			if err == nil {
+				t.Fatal("changed destination was accepted")
+			}
+
+			if test.swapParent {
+				if _, err := os.Stat(filepath.Join(second, "procedure.md")); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("unexpected output in changed parent: %v", err)
+				}
+			} else if content, err := os.ReadFile(path); err != nil || string(content) != "changed" {
+				t.Fatalf("changed target = %q, error = %v", content, err)
 			}
 		})
 	}

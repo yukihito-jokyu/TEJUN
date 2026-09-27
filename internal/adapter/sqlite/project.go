@@ -767,9 +767,14 @@ func (r *ProjectRepository) DeleteProject(
 	}
 
 	statements := []string{
+		`DELETE FROM procedure_revision_jobs WHERE procedure_id IN (SELECT procedure_id FROM procedures WHERE project_id=?)`,
+		`DELETE FROM procedure_turns WHERE procedure_id IN (SELECT procedure_id FROM procedures WHERE project_id=?)`,
+		`DELETE FROM procedure_source_evidence WHERE procedure_id IN (SELECT procedure_id FROM procedures WHERE project_id=?)`,
 		`DELETE FROM procedure_evidence WHERE procedure_id IN (SELECT procedure_id FROM procedures WHERE project_id=?)`,
 		`DELETE FROM procedure_sources WHERE procedure_id IN (SELECT procedure_id FROM procedures WHERE project_id=?)`,
+		`DELETE FROM procedure_drafts WHERE procedure_id IN (SELECT procedure_id FROM procedures WHERE project_id=?)`,
 		`DELETE FROM check_evidence WHERE check_id IN (SELECT check_id FROM check_items WHERE project_id=?)`,
+		`DELETE FROM execution_evidence WHERE execution_id IN (SELECT execution_id FROM executions WHERE project_id=?)`,
 		`DELETE FROM evidence_records WHERE execution_id IN (SELECT execution_id FROM executions WHERE project_id=?)`,
 		`DELETE FROM execution_checks WHERE execution_id IN (SELECT execution_id FROM executions WHERE project_id=?)`,
 		`DELETE FROM executions WHERE project_id=?`,

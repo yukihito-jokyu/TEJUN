@@ -107,8 +107,8 @@ func TestOpenAppliesMigrationsAndPragmas(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if version != 9 {
-				t.Fatalf("version=%d, want 9", version)
+			if version != 11 {
+				t.Fatalf("version=%d, want 11", version)
 			}
 
 			assertPragmasOnTwoConnections(t, db)
@@ -200,8 +200,10 @@ func TestOpenUpgradesExistingExecution(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := provider.Down(ctx); err != nil {
-		t.Fatal(err)
+	for range 3 {
+		if _, err := provider.Down(ctx); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	if _, err := db.ExecContext(ctx, `INSERT INTO executions(execution_id, project_id, session_id, revision, started_at)
@@ -209,8 +211,10 @@ VALUES ('legacy', 'p', 's', 1, '')`); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := provider.Up(ctx); err != nil {
-		t.Fatal(err)
+	for range 3 {
+		if _, err := provider.Up(ctx); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	var status, startedAt string

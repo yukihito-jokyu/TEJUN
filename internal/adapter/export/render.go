@@ -39,6 +39,11 @@ type EvidenceRef struct {
 	Included    bool   `json:"included"`
 }
 
+type EvidenceContent struct {
+	Kind string
+	Data []byte
+}
+
 func Render(format string, documentJSON []byte, output io.Writer) error {
 	return RenderWithEvidence(format, documentJSON, "", nil, output)
 }
@@ -47,7 +52,7 @@ func RenderWithEvidence(
 	format string,
 	documentJSON []byte,
 	procedureID string,
-	read func(string, string) ([]byte, error),
+	read func(string, string) (EvidenceContent, error),
 	output io.Writer,
 ) error {
 	var document Document
@@ -128,7 +133,12 @@ func plain(value string) string {
 	return strings.ReplaceAll(value, "\n", " ")
 }
 
-func pdf(document Document, procedureID string, read func(string, string) ([]byte, error), output io.Writer) error {
+func pdf(
+	document Document,
+	procedureID string,
+	read func(string, string) (EvidenceContent, error),
+	output io.Writer,
+) error {
 	p := &gopdf.GoPdf{}
 	p.Start(gopdf.Config{PageSize: *gopdf.PageSizeA4})
 
@@ -250,15 +260,31 @@ func pdf(document Document, procedureID string, read func(string, string) ([]byt
 
 			if evidence.Included {
 				if evidence.EvidenceID == "" || read == nil {
-					return fmt.Errorf("証跡画像を読み取れません")
+					return fmt.Errorf("証跡を読み取れません")
 				}
 
-				data, err := read(procedureID, evidence.EvidenceID)
+				content, err := read(procedureID, evidence.EvidenceID)
 				if err != nil {
 					return err
 				}
 
-				imageBytes, width, height, err := normalizeEvidenceImage(data)
+				if content.Kind == "text" {
+					if len(content.Data) > 64<<10 {
+						return fmt.Errorf("証跡のテキストが大きすぎます")
+					}
+
+					if err := writeLine(string(content.Data), "body"); err != nil {
+						return err
+					}
+
+					continue
+				}
+
+				if content.Kind != "image" {
+					return fmt.Errorf("証跡の種類が不正です")
+				}
+
+				imageBytes, width, height, err := normalizeEvidenceImage(content.Data)
 				if err != nil {
 					return err
 				}

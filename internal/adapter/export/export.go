@@ -30,14 +30,14 @@ type selection struct {
 }
 
 type Exporter struct {
-	readEvidence func(string, string) ([]byte, error)
+	readEvidence func(string, string) (EvidenceContent, error)
 	mu           sync.Mutex
 	selections   map[string]selection
 	pdfSlot      chan struct{}
 	syncRoot     func(*os.Root) error
 }
 
-func (e *Exporter) SetEvidenceReader(read func(string, string) ([]byte, error)) {
+func (e *Exporter) SetEvidenceReader(read func(string, string) (EvidenceContent, error)) {
 	e.readEvidence = read
 }
 
@@ -147,6 +147,25 @@ func (e *Exporter) Export(ctx context.Context, job application.ClaimedProjectJob
 	selected, ok := e.selections[job.Destination.VerifiedRootID]
 	delete(e.selections, job.Destination.VerifiedRootID)
 	e.mu.Unlock()
+
+	if !ok {
+		verified, identity, err := e.Verify(job.Destination.AbsolutePath, job.ProcedureID, job.ProcedureRevision)
+		if err != nil {
+			return err
+		}
+
+		if verified.ResolvedPath != job.Destination.ResolvedPath ||
+			(job.OverwriteConfirmed && !sameIdentity(identity, job.OverwriteIdentity)) ||
+			(!job.OverwriteConfirmed && identity != nil) {
+			e.Release(verified.VerifiedRootID)
+			return invalidDestination()
+		}
+
+		e.mu.Lock()
+		selected, ok = e.selections[verified.VerifiedRootID]
+		delete(e.selections, verified.VerifiedRootID)
+		e.mu.Unlock()
+	}
 
 	if ok {
 		selected.timer.Stop()

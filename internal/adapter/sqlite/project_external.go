@@ -610,7 +610,17 @@ func (r *ProjectExternalRepository) FailInterruptedProjectJobs(ctx context.Conte
 
 	if _, err := tx.ExecContext(
 		ctx,
-		`UPDATE exports SET state='failed',completed_at=?,error_code='operation_interrupted' WHERE export_id IN (SELECT target_id FROM background_jobs WHERE kind='export' AND state IN ('pending','running'))`,
+		`UPDATE exports SET state='pending',completed_at=NULL,error_code=NULL,
+destination_metadata_json=json_remove(destination_metadata_json,'$.publishedSha256')
+WHERE export_id IN (SELECT target_id FROM background_jobs WHERE kind='export' AND state IN ('pending','running'))`,
+	); err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(
+		ctx,
+		`UPDATE background_jobs SET state='interrupted',completed_at=?,error_code='operation_interrupted'
+WHERE kind='reconnect' AND state IN ('pending','running')`,
 		stamp,
 	); err != nil {
 		return err
@@ -618,8 +628,8 @@ func (r *ProjectExternalRepository) FailInterruptedProjectJobs(ctx context.Conte
 
 	if _, err := tx.ExecContext(
 		ctx,
-		`UPDATE background_jobs SET state='interrupted',completed_at=?,error_code='operation_interrupted' WHERE state IN ('pending','running')`,
-		stamp,
+		`UPDATE background_jobs SET state='pending',completed_at=NULL,error_code=NULL
+WHERE kind='export' AND state IN ('pending','running')`,
 	); err != nil {
 		return err
 	}

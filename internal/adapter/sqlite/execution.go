@@ -12,6 +12,7 @@ import (
 
 	"github.com/yukihito-jokyu/TEJUN/internal/application"
 	"github.com/yukihito-jokyu/TEJUN/internal/domain/execution"
+	"github.com/yukihito-jokyu/TEJUN/internal/domain/procedure"
 	"github.com/yukihito-jokyu/TEJUN/internal/domain/shared"
 )
 
@@ -503,6 +504,65 @@ func (r *ExecutionRepository) GenerateProcedureDraft(
 		return application.MutationResult[application.ProcedureGenerationAccepted]{}, err
 	}
 
+	var name string
+	if err := tx.QueryRowContext(ctx, `SELECT name FROM projects WHERE project_id=?`, projectID).
+		Scan(&name); err != nil {
+		return application.MutationResult[application.ProcedureGenerationAccepted]{}, err
+	}
+
+	document := procedure.Document{Title: name, Prerequisites: []string{}, Steps: []procedure.Step{}}
+	for _, check := range snapshot.Checks {
+		step := procedure.Step{
+			ID: check.ID, ClientKey: check.ID, Title: check.Title, Description: check.Instruction,
+			Command: "", Notes: []string{}, EvidenceRefs: []procedure.EvidenceRef{},
+		}
+		for _, evidence := range check.Evidence {
+			step.EvidenceRefs = append(step.EvidenceRefs, procedure.EvidenceRef{
+				EvidenceID: evidence.ID, DisplayName: evidence.DisplayName, Included: true,
+			})
+		}
+
+		document.Steps = append(document.Steps, step)
+	}
+
+	documentJSON, err := json.Marshal(document)
+	if err != nil {
+		return application.MutationResult[application.ProcedureGenerationAccepted]{}, err
+	}
+
+	if _, err := tx.ExecContext(ctx, `INSERT INTO procedures
+(procedure_id,project_id,revision,status,document_json,created_at,updated_at)
+VALUES (?,?,1,'draft',?,?,?)`, record.ProcedureID, projectID, string(documentJSON),
+		record.At.UnixMicro(), record.At.UnixMicro()); err != nil {
+		return application.MutationResult[application.ProcedureGenerationAccepted]{}, err
+	}
+
+	if _, err := tx.ExecContext(ctx, `INSERT INTO procedure_sources
+(procedure_id,execution_id,execution_revision,check_count,evidence_count,captured_at)
+VALUES (?,?,?,?,(SELECT COUNT(*) FROM execution_evidence WHERE execution_id=?),?)`,
+		record.ProcedureID, record.ExecutionID, snapshot.Revision, len(snapshot.Checks), record.ExecutionID,
+		record.At.UnixMicro()); err != nil {
+		return application.MutationResult[application.ProcedureGenerationAccepted]{}, err
+	}
+
+	if _, err := tx.ExecContext(ctx, `INSERT INTO procedure_source_evidence(procedure_id,evidence_id)
+SELECT ?,evidence_id FROM execution_evidence WHERE execution_id=?`, record.ProcedureID,
+		record.ExecutionID); err != nil {
+		return application.MutationResult[application.ProcedureGenerationAccepted]{}, err
+	}
+
+	if _, err := tx.ExecContext(ctx, `INSERT INTO procedure_evidence(procedure_id,evidence_id)
+SELECT ?,er.evidence_id FROM evidence_records er JOIN execution_evidence ee
+ON ee.evidence_id=er.evidence_id WHERE ee.execution_id=? AND ee.kind='image'`,
+		record.ProcedureID, record.ExecutionID); err != nil {
+		return application.MutationResult[application.ProcedureGenerationAccepted]{}, err
+	}
+
+	if _, err := tx.ExecContext(ctx, `UPDATE projects SET status='procedure_editing',current_stage='procedure',
+revision=revision+1,updated_at=? WHERE project_id=?`, record.At.UnixMicro(), projectID); err != nil {
+		return application.MutationResult[application.ProcedureGenerationAccepted]{}, err
+	}
+
 	if _, err := tx.ExecContext(
 		ctx,
 		`UPDATE executions SET status = 'completed', completed_at = ?, revision = revision + 1
@@ -521,7 +581,7 @@ WHERE singleton = 1 RETURNING change_sequence`).Scan(&sequence); err != nil {
 
 	result := application.MutationResult[application.ProcedureGenerationAccepted]{
 		Data: application.ProcedureGenerationAccepted{
-			ProcedureID: record.ProcedureID, NextRoute: "#/procedure/" + projectID, AcceptedAt: record.At,
+			ProcedureID: record.ProcedureID, NextRoute: "#/projects/" + projectID + "/procedure", AcceptedAt: record.At,
 		},
 		Receipt: application.MutationReceipt{OperationID: record.OperationID, CommittedAt: record.At},
 	}

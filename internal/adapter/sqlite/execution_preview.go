@@ -30,3 +30,20 @@ AND v.kind = 'image' AND b.status = 'available'`, projectID, executionID, checkI
 
 	return data, mime, nil
 }
+
+func (s *EvidenceStore) ReadForGeneratedProcedure(ctx context.Context, procedureID, evidenceID string) ([]byte, error) {
+	var hash, mime, relative string
+
+	err := s.db.QueryRowContext(ctx, `SELECT b.hash,b.mime,b.relative_path
+FROM procedure_source_evidence p
+JOIN execution_evidence e ON e.evidence_id=p.evidence_id
+JOIN procedure_sources s ON s.procedure_id=p.procedure_id AND s.execution_id=e.execution_id
+JOIN evidence_blobs b ON b.hash=e.blob_hash
+WHERE p.procedure_id=? AND p.evidence_id=? AND e.kind='image' AND b.status='available'`, procedureID, evidenceID).
+		Scan(&hash, &mime, &relative)
+	if err != nil {
+		return nil, errors.New("利用可能な画像証跡ではありません")
+	}
+
+	return s.readBlob(relative, hash, mime)
+}
