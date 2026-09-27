@@ -1,0 +1,102 @@
+.procedure-page {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: var(--ds-space-8);
+  color: var(--foreground);
+}
+.procedure-header,
+.procedure-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-3);
+}
+.procedure-header {
+  margin-bottom: var(--ds-space-6);
+}
+.procedure-eyebrow {
+  color: var(--muted-foreground);
+}
+.procedure-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(360px, 2fr) minmax(220px, 1fr);
+  gap: var(--ds-space-4);
+  align-items: start;
+}
+.procedure-panel {
+  display: grid;
+  gap: var(--ds-space-3);
+  min-width: 0;
+  padding: var(--ds-space-6);
+  border: var(--ds-border-width-control) solid var(--border);
+  border-radius: var(--ds-radius-lg);
+  background: var(--card);
+}
+.procedure-panel h2,
+.procedure-panel h3,
+.procedure-dialog h2,
+.procedure-dialog h3 {
+  margin: 0;
+}
+.procedure-panel label {
+  font-weight: 600;
+}
+.procedure-panel ul {
+  margin: 0;
+  padding-left: var(--ds-space-6);
+}
+.procedure-conversation {
+  max-height: 20rem;
+  overflow: auto;
+}
+.procedure-step {
+  display: grid;
+  gap: var(--ds-space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--ds-radius-md);
+  padding: var(--ds-space-4);
+}
+.procedure-step legend {
+  font-weight: 700;
+}
+.procedure-check {
+  display: flex;
+  gap: var(--ds-space-2);
+  align-items: center;
+}
+.procedure-evidence-ref {
+  display: grid;
+  gap: var(--ds-space-2);
+}
+.procedure-dialog {
+  width: min(92vw, 700px);
+  max-height: 85vh;
+  overflow: auto;
+  padding: var(--ds-space-6);
+  border: var(--ds-border-width-control) solid var(--border);
+  border-radius: var(--ds-radius-lg);
+  background: var(--card);
+  color: var(--foreground);
+}
+.procedure-dialog::backdrop {
+  background: rgb(0 0 0 / 60%);
+}
+.procedure-dialog section {
+  display: grid;
+  gap: var(--ds-space-2);
+}
+.procedure-dialog pre {
+  overflow: auto;
+  padding: var(--ds-space-4);
+  background: var(--surface-soft);
+}
+.procedure-dialog img {
+  max-width: 100%;
+  height: auto;
+}
+@media (max-width: 1000px) {
+  .procedure-layout {
+    grid-template-columns: 1fr;
+  }
+}

@@ -13,6 +13,7 @@ const method = {
   human: 2726358031,
   permission: 3397895456,
   generate: 4023294307,
+  procedure: 2087193246,
 } as const;
 
 const side = (checked = false) => ({
@@ -168,6 +169,36 @@ async function mockExecution(page: Page, state: State, initialRoute = "#/project
         },
       });
     if (id === method.get) return route.fulfill({ json: state });
+    if (id === method.procedure)
+      return route.fulfill({
+        json: {
+          project: { projectId: "p", name: state.project.name },
+          procedure: {
+            procedureId: "procedure",
+            revision: 1,
+            revisionNumber: 1,
+            status: "draft",
+            document: {
+              title: "生成した手順書",
+              overview: "動作確認",
+              prerequisites: [],
+              steps: [],
+            },
+          },
+          source: {
+            executionId: state.execution.executionId,
+            executionRevision: state.execution.revision,
+            checkCount: 1,
+            evidenceCount: 1,
+          },
+          evidence: { ai: [], human: [] },
+          integrity: { status: "valid", issues: [] },
+          conversation: { items: [], previousCursor: null, hasPrevious: false },
+          activeRevision: null,
+          elicitations: [],
+          changeSequence: state.changeSequence,
+        },
+      });
     if (
       !(
         [
@@ -294,6 +325,7 @@ test("準備から開始し、AI結果と人間証跡を確認して生成する
   await expect(page.getByText("表示を確認した")).toBeVisible();
   await page.getByRole("button", { name: "手順書の下書きを生成" }).click();
   await expect(page).toHaveURL(/#\/projects\/p\/procedure$/);
+  await expect(page.getByRole("heading", { name: "生成した手順書" })).toBeVisible();
   expect(calls.map((call) => call.id)).toEqual([
     method.start,
     method.message,

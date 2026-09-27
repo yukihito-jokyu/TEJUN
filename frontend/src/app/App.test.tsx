@@ -73,6 +73,9 @@ vi.mock("@/shared/api/wails", () => ({
 vi.mock("@/pages/preparation/PreparationRoute", () => ({
   PreparationRoute: () => <h1>準備画面</h1>,
 }));
+vi.mock("@/pages/procedure/ProcedureRoute", () => ({
+  ProcedureRoute: () => <h1>手順書画面</h1>,
+}));
 
 afterEach(cleanup);
 
@@ -92,6 +95,20 @@ beforeEach(() => {
 });
 
 describe("App routing", () => {
+  it("手順書 route を明示的に開く", async () => {
+    vi.mocked(getStartupState).mockResolvedValue({
+      initialSetupRequired: false,
+      nextRoute: "/projects",
+      defaultConnection: undefined,
+      changeSequence: 1,
+    });
+    render(
+      <MemoryRouter initialEntries={["/projects/p-1/procedure"]}>
+        <App />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole("heading", { name: "手順書画面" })).toBeTruthy();
+  });
   it("一覧から準備画面へ進む", async () => {
     vi.mocked(getStartupState).mockResolvedValue({
       initialSetupRequired: false,
