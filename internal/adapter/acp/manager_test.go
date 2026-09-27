@@ -17,6 +17,51 @@ import (
 	"github.com/yukihito-jokyu/TEJUN/internal/domain/shared"
 )
 
+func TestPreparationActivity(t *testing.T) {
+	completed := sdk.ToolCallStatusCompleted
+	ids := []string{"agent-live-1", "agent-buffer", "tool-log", "agent-live-2"}
+	m := NewManager(nil, time.Now, func() string {
+		id := ids[0]
+		ids = ids[1:]
+
+		return id
+	})
+	m.sessions["session"] = &session{agentSessionID: "agent", pendingTurnID: "turn"}
+	c := client{manager: m}
+
+	for _, update := range []sdk.SessionUpdate{
+		{AgentMessageChunk: &sdk.SessionUpdateAgentMessageChunk{MessageId: sdk.Ptr("first"), Content: sdk.TextBlock("READMEを確認しています。")}},
+		{ToolCall: &sdk.SessionUpdateToolCall{ToolCallId: "tool", Title: "READMEを読む", Status: sdk.ToolCallStatusInProgress}},
+		{ToolCallUpdate: &sdk.SessionToolCallUpdate{ToolCallId: "tool", Status: &completed}},
+		{AgentMessageChunk: &sdk.SessionUpdateAgentMessageChunk{MessageId: sdk.Ptr("second"), Content: sdk.TextBlock("手順を整理しています。")}},
+		{AgentMessageChunk: &sdk.SessionUpdateAgentMessageChunk{MessageId: sdk.Ptr("second"), Content: sdk.TextBlock("```tejun-preparation\n{}\n```")}},
+	} {
+		if err := c.SessionUpdate(
+			context.Background(),
+			sdk.SessionNotification{SessionId: "agent", Update: update},
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	activity := m.PreparationActivity("session")
+	if activity == nil || activity.TurnID != "turn" || activity.Phase != "responding" || len(activity.Items) != 3 {
+		t.Fatalf("activity=%+v", activity)
+	}
+
+	if activity.Items[0].Content[0].Text != "READMEを確認しています。" ||
+		activity.Items[1].Content[0].Text != "READMEを読む" ||
+		activity.Items[2].Content[0].Text != "手順を整理しています。" {
+		t.Fatalf("activity=%+v", activity)
+	}
+
+	log := m.sessions["session"].activityLog
+	if len(log) != 3 || log[1].Role != "system" || log[1].Status != "completed" ||
+		log[1].Content[0].Text != "READMEを読む" {
+		t.Fatalf("activity log=%+v", log)
+	}
+}
+
 func TestManagerACPContractAndCleanup(t *testing.T) {
 	ids := []string{"probe-1"}
 	manager := NewManager(nil, time.Now, func() string {
@@ -170,7 +215,9 @@ func TestPreparationACPJob(t *testing.T) {
 			}
 
 			if tt.name == "turn" &&
-				(result.StopReason != tt.want || len(result.Messages) != 1 || result.Messages[0].Content[0].Text != preparationFallbackMessage) {
+				(result.StopReason != tt.want || len(result.Messages) != 2 ||
+					result.Messages[0].Content[0].Text != "reply" ||
+					result.Messages[1].Content[0].Text != preparationFallbackMessage) {
 				t.Fatalf("turn result = %+v", result)
 			}
 		})
@@ -654,6 +701,17 @@ func TestFakeACPProcess(t *testing.T) {
 			answer := "reply"
 			if os.Getenv("FAKE_ACP_MODE") == "execution_checks" {
 				answer = `{"results":[{"checkId":"c","status":"completed","evidence":"fake ACP observed result"}]}`
+			}
+
+			if os.Getenv("FAKE_ACP_MODE") == "execution_retry_json" {
+				answer = "```\nnot json\n```"
+				if promptCount == 2 {
+					answer = `{"results":[{"checkId":"c","status":"completed","evidence":"recovered result"}]}`
+				}
+			}
+
+			if os.Getenv("FAKE_ACP_MODE") == "execution_invalid_json" {
+				answer = "```\nnot json\n```"
 			}
 
 			if os.Getenv("FAKE_ACP_MODE") == "execution_late_chunk" && promptCount == 2 {

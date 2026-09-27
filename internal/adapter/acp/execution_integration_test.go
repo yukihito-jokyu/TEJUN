@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,6 +21,8 @@ func TestExecutionWorkerSQLiteAndProcessRecovery(t *testing.T) {
 		interrupt, cancel bool
 	}{
 		{name: "worker result persists", mode: "execution_checks"},
+		{name: "invalid JSON is retried", mode: "execution_retry_json"},
+		{name: "invalid JSON attempts remain visible", mode: "execution_invalid_json"},
 		{name: "permission response persists", mode: "execution_permission"},
 		{name: "late chunk cannot complete check", mode: "execution_late_chunk"},
 		{name: "running job is not replayed after restart", mode: "block_prompt", interrupt: true},
@@ -227,7 +230,9 @@ func TestExecutionWorkerSQLiteAndProcessRecovery(t *testing.T) {
 
 			if !tc.interrupt {
 				ran, err := runner.RunOne(ctx)
-				if !ran || (err != nil) != (tc.mode == "execution_late_chunk") {
+
+				wantError := tc.mode == "execution_late_chunk" || tc.mode == "execution_invalid_json"
+				if !ran || (err != nil) != wantError {
 					t.Fatalf("run=%t err=%v", ran, err)
 				}
 
@@ -236,6 +241,17 @@ func TestExecutionWorkerSQLiteAndProcessRecovery(t *testing.T) {
 					if err := db.QueryRowContext(ctx, `SELECT state FROM execution_agent_jobs WHERE job_id=?`,
 						accepted.Data.JobID).Scan(&state); err != nil || state != "failed" {
 						t.Fatalf("late chunk job state=%q err=%v", state, err)
+					}
+
+					return
+				}
+
+				if tc.mode == "execution_invalid_json" {
+					view, err := repository.GetExecution(ctx, "p", 10)
+					if err != nil || len(view.Conversation) < 5 ||
+						view.Checks[0].AIStatus != "failed" ||
+						!strings.Contains(view.Conversation[1].Text, "形式エラー") {
+						t.Fatalf("failed view=%+v err=%v", view, err)
 					}
 
 					return

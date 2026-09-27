@@ -58,9 +58,9 @@ func (m *Manager) ExecuteExecutionJob(
 			return application.ExecutionJobResult{}, err
 		}
 
-		prompt = "次の各checkを実行し、結果をJSONオブジェクトのみで返してください。" +
+		prompt = "次の1件のcheckを実行し、結果と観測した証跡をJSONオブジェクトのみで返してください。" +
 			`形式: {"results":[{"checkId":"...","status":"completed|failed","evidence":"具体的な証跡"}]}` +
-			"。すべてのcheckを一度ずつ含めてください。対象check: " + string(payload)
+			"。対象check: " + string(payload)
 	}
 
 	m.mu.Lock()
@@ -84,16 +84,96 @@ func (m *Manager) ExecuteExecutionJob(
 	s.pendingRunID = job.RunID
 	s.pendingTurnDone = make(chan struct{})
 	s.messages = nil
+	s.activityTools = nil
+	s.activityLog = nil
+	s.activityPhase = "thinking"
+	s.activityMessageID = ""
 	m.mu.Unlock()
 
-	response, err := s.connection.Prompt(ctx, sdk.PromptRequest{
-		SessionId: s.agentSessionID,
-		Prompt:    []sdk.ContentBlock{{Text: &sdk.ContentBlockText{Type: "text", Text: prompt}}},
-	})
+	result := application.ExecutionJobResult{Logs: []string{}}
+
+	var runErr error
+
+	for attempt := 0; attempt < 3; attempt++ {
+		response, err := s.connection.Prompt(ctx, sdk.PromptRequest{
+			SessionId: s.agentSessionID,
+			Prompt:    []sdk.ContentBlock{{Text: &sdk.ContentBlockText{Type: "text", Text: prompt}}},
+		})
+
+		m.mu.Lock()
+
+		messages := append([]application.ConversationItem(nil), s.messages...)
+		tools := append([]application.PreparationToolActivity(nil), s.activityTools...)
+		s.messages = nil
+		s.activityTools = nil
+		s.activityMessageID = ""
+		m.mu.Unlock()
+
+		for _, tool := range tools {
+			if strings.TrimSpace(tool.Title) != "" {
+				result.Logs = append(result.Logs, tool.Title+" ("+tool.Status+")")
+			}
+		}
+
+		if err != nil {
+			runErr = acpError(err, "prompt")
+			break
+		}
+
+		if response.StopReason == sdk.StopReasonCancelled {
+			result.Cancelled = true
+			break
+		}
+
+		if response.StopReason != sdk.StopReasonEndTurn {
+			runErr = errors.New("agent turn did not complete")
+			break
+		}
+
+		var answer strings.Builder
+
+		for _, message := range messages {
+			if message.Role == "agent" {
+				for _, content := range message.Content {
+					if content.Type == "text" {
+						answer.WriteString(content.Text)
+					}
+				}
+			}
+		}
+
+		if job.Kind == "message" {
+			result.Message = answer.String()
+			break
+		}
+
+		result.Checks, runErr = parseCheckResults(answer.String(), job.Checks)
+		if runErr == nil {
+			break
+		}
+
+		result.Logs = append(result.Logs,
+			fmt.Sprintf("AIの回答（形式エラー、%d回目）: %s", attempt+1, answer.String()))
+		if attempt == 2 {
+			break
+		}
+
+		prompt = "直前の回答はJSONとして読み取れませんでした（" + runErr.Error() +
+			"）。コマンドを再実行せず、直前に観測した結果だけを次の形式のJSONオブジェクトで再出力してください。" +
+			`{"results":[{"checkId":"` + job.Checks[0].CheckID +
+			`","status":"completed|failed","evidence":"具体的な証跡"}]}` +
+			"。Markdownのコードフェンスや説明文は付けないでください。"
+
+		m.mu.Lock()
+		s.activityLog = append(s.activityLog, application.ConversationItem{
+			MessageID: m.newID(), TurnID: s.pendingTurnID, Role: "system", Status: "completed",
+			CreatedAt: m.now(), Content: []application.ContentPart{{Type: "text", Text: "JSON形式を確認し、AIに再出力を依頼しています"}},
+		})
+		s.activityPhase = "thinking"
+		m.mu.Unlock()
+	}
 
 	m.mu.Lock()
-
-	messages := append([]application.ConversationItem(nil), s.messages...)
 	close(s.pendingTurnDone)
 	s.pendingTurnDone = nil
 	s.pendingTurnID = ""
@@ -103,43 +183,46 @@ func (m *Manager) ExecuteExecutionJob(
 	s.messages = nil
 	m.mu.Unlock()
 
-	if err != nil {
-		return application.ExecutionJobResult{}, acpError(err, "prompt")
+	return result, runErr
+}
+
+func (m *Manager) ExecutionActivity(sessionID string) *application.PreparationActivity {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s := m.sessions[sessionID]
+	if s == nil || s.pendingExecutionJobID == "" {
+		return nil
 	}
 
-	if response.StopReason == sdk.StopReasonCancelled {
-		return application.ExecutionJobResult{Cancelled: true}, nil
+	items := make([]application.ConversationItem, len(s.activityLog))
+	for i, item := range s.activityLog {
+		items[i] = item
+		items[i].Content = append([]application.ContentPart{}, item.Content...)
 	}
 
-	if response.StopReason != sdk.StopReasonEndTurn {
-		return application.ExecutionJobResult{}, errors.New("agent turn did not complete")
+	return &application.PreparationActivity{
+		TurnID: s.pendingTurnID,
+		Phase:  s.activityPhase,
+		Items:  items,
 	}
-
-	var answer strings.Builder
-
-	for _, message := range messages {
-		if message.Role == "agent" {
-			for _, content := range message.Content {
-				if content.Type == "text" {
-					answer.WriteString(content.Text)
-				}
-			}
-		}
-	}
-
-	if job.Kind == "message" {
-		return application.ExecutionJobResult{Message: answer.String()}, nil
-	}
-
-	checks, err := parseCheckResults(answer.String(), job.Checks)
-
-	return application.ExecutionJobResult{Checks: checks}, err
 }
 
 func parseCheckResults(
 	answer string,
 	targets []application.ExecutionCheckTarget,
 ) ([]application.ExecutionCheckResult, error) {
+	if _, fenced, ok := strings.Cut(answer, "```"); ok {
+		if body, _, closed := strings.Cut(fenced, "```"); closed {
+			body = strings.TrimSpace(body)
+
+			body = strings.TrimPrefix(body, "json")
+			if strings.HasPrefix(strings.TrimSpace(body), "{") {
+				answer = body
+			}
+		}
+	}
+
 	var envelope struct {
 		Results []application.ExecutionCheckResult `json:"results"`
 	}

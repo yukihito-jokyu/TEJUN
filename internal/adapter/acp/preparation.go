@@ -159,6 +159,10 @@ func (m *Manager) ExecutePreparation(
 		s.pendingTurnDone = make(chan struct{})
 		s.cancelTimedOut = false
 		s.messages = nil
+		s.activityPhase = "thinking"
+		s.activityTools = nil
+		s.activityLog = nil
+		s.activityMessageID = ""
 		m.mu.Unlock()
 
 		response, err := s.connection.Prompt(ctx, sdk.PromptRequest{SessionId: s.agentSessionID, Prompt: parts})
@@ -166,6 +170,7 @@ func (m *Manager) ExecutePreparation(
 		m.mu.Lock()
 
 		completed.Messages = append([]application.ConversationItem(nil), s.messages...)
+		activityLog := append([]application.ConversationItem(nil), s.activityLog...)
 		timedOut := s.cancelTimedOut
 		close(s.pendingTurnDone)
 		s.pendingTurnDone = nil
@@ -174,6 +179,14 @@ func (m *Manager) ExecutePreparation(
 		m.mu.Unlock()
 
 		if err != nil {
+			activityLog = visiblePreparationLog(activityLog)
+			for i := range activityLog {
+				if activityLog[i].Status == "streaming" {
+					activityLog[i].Status = "interrupted"
+				}
+			}
+
+			completed.Messages = activityLog
 			if timedOut {
 				completed.StopReason = "interrupted"
 			}
@@ -182,7 +195,25 @@ func (m *Manager) ExecutePreparation(
 		}
 
 		completed.BriefSuggestion = takeBriefSuggestion(completed.Messages)
-		completed.Messages = m.preparationReply(completed.Messages, completed.BriefSuggestion, job.TurnID)
+		reply := m.preparationReply(completed.Messages, completed.BriefSuggestion, job.TurnID)
+		activityLog = visiblePreparationLog(activityLog)
+		hasAgentMessage := false
+
+		for i := range activityLog {
+			if activityLog[i].Status == "streaming" {
+				activityLog[i].Status = "completed"
+			}
+
+			if activityLog[i].Role == "agent" {
+				hasAgentMessage = true
+			}
+		}
+
+		if !hasAgentMessage || completed.BriefSuggestion == nil {
+			activityLog = append(activityLog, reply...)
+		}
+
+		completed.Messages = activityLog
 		completed.AgentSessionID = string(s.agentSessionID)
 		completed.StopReason = string(response.StopReason)
 		completed.Success = true
@@ -243,10 +274,74 @@ func (m *Manager) ExecutePreparation(
 	}
 }
 
-const preparationInstruction = `あなたは手順書の準備担当です。利用者が作りたい手順書について、作業場所のREADME、Taskfile、依存関係、設定などを読み取り、必要なら公式資料も調べ、右側の目的・完了条件・想定利用者・動作チェック案を具体化してください。調査は読み取りに限り、インストール、build、起動、ファイル編集など手順書に書く作業を今ここで実行しないでください。
-調査環境で既に導入済みのツールや依存関係を、手順書を使う人にもあると仮定しないでください。初めて構築する人がゼロから再現できるよう、必要なツールとその導入方法、依存関係の導入、設定、起動・検証を調べてください。OSや前提が資料から特定できなければ明示し、推測で埋めないでください。
-目的は作る手順書の対象、完了条件は手順全体の最終的な到達状態です。動作チェック案は、その手順書を組み立てるための順序付きの確認項目であり、完了条件を一件のチェックへ言い換えたものではありません。前提ツール、導入、設定、起動など必要な段階を過不足なく分け、各項目のinstructionに実施内容、expectedResultに観測できる結果を書いてください。たとえばtask devが完了条件でも、それだけを唯一の確認項目にしないでください。
-まず自分で調べ、分かった内容をまとめて提案してください。一問一答を進めず、資料から解決できない重要な不明点が残る場合だけ、関連する質問をまとめて尋ねてください。通常の説明の末尾には毎回、言語名をtejun-preparationとしたMarkdownのJSONコードブロックを付けてください。キーはpurpose、completionCriteria（文字列配列）、intendedUsers、checkItems（全項目の配列）、question（必要な質問）です。checkItemsの各要素はtitle、instruction、expectedResult、suggestedCommandを持ちます。変更のないキーは省略し、既存の案を変更する場合はcheckItemsを全件返してください。`
+func (m *Manager) PreparationActivity(sessionID string) *application.PreparationActivity {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s := m.sessions[sessionID]
+	if s == nil || s.pendingTurnID == "" || s.pendingExecutionJobID != "" {
+		return nil
+	}
+
+	return &application.PreparationActivity{
+		TurnID: s.pendingTurnID,
+		Phase:  s.activityPhase,
+		Items:  visiblePreparationLog(s.activityLog),
+	}
+}
+
+func visiblePreparationLog(log []application.ConversationItem) []application.ConversationItem {
+	visible := make([]application.ConversationItem, 0, len(log))
+	for _, item := range log {
+		if item.Role == "agent" {
+			text, _, _ := strings.Cut(item.Content[0].Text, "```tejun-preparation")
+
+			text = strings.TrimSpace(text)
+			if text == "" {
+				continue
+			}
+
+			item.Content = []application.ContentPart{{Type: "text", Text: text}}
+		}
+
+		visible = append(visible, item)
+	}
+
+	return visible
+}
+
+const preparationInstruction = `あなたは手順書の準備担当です。利用者が作りたい手順書について、作業場所、依存関係、設定などを読み取り、必要なら公式資料もネット上で調べ、目的・完了条件・想定利用者・動作チェック案を具体化してください。調査は読み取りに限り、インストール、build、起動、ファイル編集など手順書に書く作業を今ここで実行しないでください。
+調査環境で既に導入済みのツールや依存関係を、手順書を使う人にもあると仮定しないでください。初めて構築する人がゼロから再現できるよう、必要なツールとその導入方法、依存関係の導入、設定、起動・検証を調べてください。動作チェック案は対象者のOSを勝手に限定せず、複数OSで同じように実施できる確認項目とコマンドだけを記載してください。調査に使っているOSの開発ツールやパッケージ管理コマンド（xcode-select、brew、apt、wingetなど）やシェル固有のコマンドを、汎用の確認項目に入れないでください。OSで方法が異なる作業は、確認項目には共通の到達状態を書き、suggestedCommandは空文字列にしてください。OS別の具体的な方法は通常の説明で示してください。利用者が対象OSを明示的に限定した場合に限り、そのOS固有の確認項目とコマンドを提案できます。OSや前提が資料から特定できなければ明示し、推測で埋めないでください。
+目的は作る手順書の対象、完了条件は手順全体の最終的な到達状態です。動作チェック案は、その手順書を組み立てるための順序付きの確認項目であり、完了条件を一件のチェックへ言い換えたものではありません。前提ツール、導入、設定、起動など必要な段階を過不足なく分け、各項目のinstructionに実施内容、expectedResultに観測できる結果を書いてください。1つの確認項目（連番）で実行するコマンドは1つだけにし、複数のコマンドや操作が必要なら実行順に別のcheckItemsへ分けてください。suggestedCommandにも1つのコマンドだけを書き、コマンドを使わない確認項目では空文字列にしてください。たとえばtask devが完了条件でも、それだけを唯一の確認項目にしないでください。
+まず自分で調べ、分かった内容をまとめて提案してください。一問一答を進めず、資料から解決できない重要な不明点が残る場合だけ、関連する質問をまとめて尋ねてください。既存の動作チェック案にOS固有のコマンドがあれば、上の方針に合わせて全項目を見直してください。出力前に各checkItemsのtitle、instruction、expectedResult、suggestedCommandがOSを勝手に限定していないか確認してください。通常の説明の末尾には毎回、言語名をtejun-preparationとしたMarkdownのJSONコードブロックを付けてください。キーはpurpose、completionCriteria（文字列配列）、intendedUsers、checkItems（全項目の配列）、question（必要な質問）です。checkItemsの各要素はtitle、instruction、expectedResult、suggestedCommandを持ちます。変更のないキーは省略し、既存の案を変更する場合はcheckItemsを全件返してください。
+次は出力形式の例です。値は例示であり、実際の調査結果に置き換えてください。
+` + "```tejun-preparation\n" + `{
+  "purpose": "開発環境の構築手順を共有する",
+  "completionCriteria": ["アプリケーションを起動し、画面を確認できる"],
+  "intendedUsers": "初めて参加する開発者",
+  "checkItems": [
+    {
+      "title": "Node.jsのバージョンを確認する",
+      "instruction": "Node.jsのバージョンを表示する",
+      "expectedResult": "指定されたバージョンが表示される",
+      "suggestedCommand": "node --version"
+    },
+    {
+      "title": "依存関係を導入する",
+      "instruction": "プロジェクトの依存関係を導入する",
+      "expectedResult": "依存関係の導入が完了する",
+      "suggestedCommand": "npm ci"
+    },
+    {
+      "title": "アプリケーションを起動する",
+      "instruction": "開発用の起動コマンドを実行する",
+      "expectedResult": "画面が表示される",
+      "suggestedCommand": "npm run dev"
+    }
+  ],
+  "question": ""
+}
+` + "```"
 
 const preparationFallbackMessage = "AIの返答を準備項目へ反映できませんでした。もう一度依頼してください。"
 
