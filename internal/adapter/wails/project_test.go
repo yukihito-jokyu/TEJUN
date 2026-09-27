@@ -24,6 +24,7 @@ func TestProjectBindingRejectsInvalidInput(t *testing.T) {
 	service := NewProjectService(
 		application.NewProjectUseCases(nil, nil, time.Now, func() string { return "id" }),
 		application.NewProjectExternal(nil, nil, time.Now, func() string { return "id" }),
+		nil,
 	)
 	ctx := context.Background()
 
@@ -81,18 +82,18 @@ func TestProjectBindingsUseCommittedData(t *testing.T) {
 
 	t.Cleanup(func() { _ = exporter.Close() })
 
-	service := NewProjectService(
-		application.NewProjectUseCases(appsqlite.NewProjectRepository(db), workspace.Validator{}, now, newID),
-		application.NewProjectExternal(appsqlite.NewProjectExternalRepository(db), exporter, now, newID),
-	)
-
 	traceWriter, err := trace.Open(directory)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	t.Cleanup(func() { _ = traceWriter.Close() })
-	service.SetTrace(traceWriter)
+
+	service := NewProjectService(
+		application.NewProjectUseCases(appsqlite.NewProjectRepository(db), workspace.Validator{}, now, newID),
+		application.NewProjectExternal(appsqlite.NewProjectExternalRepository(db), exporter, now, newID),
+		traceWriter,
+	)
 
 	created, err := service.CreateProject(
 		ctx,

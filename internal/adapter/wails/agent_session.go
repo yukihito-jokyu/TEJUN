@@ -7,6 +7,7 @@ import (
 
 	"github.com/yukihito-jokyu/TEJUN/internal/application"
 	"github.com/yukihito-jokyu/TEJUN/internal/domain/shared"
+	"github.com/yukihito-jokyu/TEJUN/internal/trace"
 )
 
 func (s *AgentControlService) CancelAgentOperation(
@@ -21,6 +22,25 @@ func (s *AgentControlService) CancelAgentOperation(
 
 	if input.TurnID == "" && input.RunID == "" && input.JobID == "" {
 		return MutationResult[CancellationAccepted]{}, validation(map[string]string{"turnId": "取消対象を指定してください"})
+	}
+
+	if s.procedureRevision != nil && input.RunID == "" {
+		ctx = trace.WithWriter(ctx, s.trace)
+		trace.Record(ctx, trace.Entry{
+			Phase: "binding_entry", Method: "CancelAgentOperation", OperationID: input.OperationID, JobID: input.JobID,
+		})
+
+		result, err := s.procedureRevision.Cancel(ctx, input.SessionID, input.TurnID, input.JobID, input.OperationID)
+		if err == nil {
+			traceAccepted(ctx, "CancelAgentOperation", "", result.Data.JobID, receipt(result.Receipt))
+
+			return cancellationResult(result), nil
+		}
+
+		var appErr *shared.Error
+		if !errors.As(err, &appErr) || appErr.Code != "not_found" {
+			return MutationResult[CancellationAccepted]{}, err
+		}
 	}
 
 	if s.execution != nil {

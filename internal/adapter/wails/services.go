@@ -8,6 +8,7 @@ import (
 	"github.com/yukihito-jokyu/TEJUN/internal/application"
 	"github.com/yukihito-jokyu/TEJUN/internal/domain/agentconnection"
 	"github.com/yukihito-jokyu/TEJUN/internal/domain/shared"
+	"github.com/yukihito-jokyu/TEJUN/internal/trace"
 )
 
 type (
@@ -20,11 +21,20 @@ type (
 		evidence   *application.ExecutionEvidence
 		previewURL func(string, string, string, string) string
 	}
-	ProcedureService    struct{}
+	ProcedureService struct {
+		procedure   *application.Procedure
+		revision    *application.ProcedureRevision
+		evidence    application.ProcedureEvidenceReader
+		projects    *ProjectService
+		previewURL  func(string, string, string, string) string
+		verifyImage func(context.Context, string, string, string, string) error
+	}
 	AgentControlService struct {
-		control     *application.AgentControl
-		preparation *application.PreparationAgentControl
-		execution   *application.ExecutionRunner
+		control           *application.AgentControl
+		preparation       *application.PreparationAgentControl
+		execution         *application.ExecutionRunner
+		procedureRevision *application.ProcedureRevision
+		trace             *trace.Writer
 	}
 )
 
@@ -46,8 +56,13 @@ func NewAgentControlService(
 	control *application.AgentControl,
 	preparation *application.PreparationAgentControl,
 	execution *application.ExecutionRunner,
+	procedureRevision *application.ProcedureRevision,
+	traceWriter *trace.Writer,
 ) *AgentControlService {
-	return &AgentControlService{control: control, preparation: preparation, execution: execution}
+	return &AgentControlService{
+		control: control, preparation: preparation, execution: execution, procedureRevision: procedureRevision,
+		trace: traceWriter,
+	}
 }
 
 type EnvironmentVariableInput struct {
