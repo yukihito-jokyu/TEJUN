@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { ArrowLeft, Bot, ChevronRight, Terminal, UserRound } from "lucide-react";
 import { FoldWelcomeCharacterIcon } from "@/components/icons/FoldWelcomeCharacterIcon";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { ErrorState } from "@/components/patterns/ErrorState";
 import { LoadingState } from "@/components/patterns/LoadingState";
+import { Spinner } from "@/components/ui/Spinner";
 import type {
   EvidenceDetail,
   EvidenceSummary,
@@ -312,19 +313,27 @@ function ProcedureContent({
           </strong>
           <p className="procedure-header-caption">{view?.project.name ?? "手順書"} / 手順書</p>
         </div>
-        <nav className="procedure-steps" aria-label="作成工程">
-          <span>
-            <b>1</b> 準備
-          </span>
-          <ChevronRight size={15} aria-hidden="true" />
-          <span>
-            <b>2</b> 動作チェック
-          </span>
-          <ChevronRight size={15} aria-hidden="true" />
-          <span className="active" aria-current="step">
-            <b>3</b> 手順書
-          </span>
-        </nav>
+        <div className="procedure-header-actions">
+          <nav className="procedure-steps" aria-label="作成工程">
+            <span>
+              <b>1</b> 準備
+            </span>
+            <ChevronRight size={15} aria-hidden="true" />
+            <span>
+              <b>2</b> 動作チェック
+            </span>
+            <ChevronRight size={15} aria-hidden="true" />
+            <span className="active" aria-current="step">
+              <b>3</b> 手順書
+            </span>
+          </nav>
+          <Button asChild variant="outline" size="sm">
+            <a href="#/projects">
+              <ArrowLeft size={16} aria-hidden="true" />
+              一覧に戻る
+            </a>
+          </Button>
+        </div>
       </header>
       <LoadingState loading={loading} initial label="手順書を読み込んでいます…">
         {error ? (
@@ -333,7 +342,6 @@ function ProcedureContent({
           <div>
             <h1 id="procedure-title">手順書</h1>
             <p>手順書はまだありません。</p>
-            <Button onClick={onReload}>再取得</Button>
           </div>
         ) : (
           <div className="procedure-layout">
@@ -349,45 +357,86 @@ function ProcedureContent({
                       : "生成完了"}
                 </span>
               </div>
-              <div className="procedure-conversation" aria-live="polite">
-                <div className="procedure-message procedure-message-ai">
+              <ol className="procedure-conversation" aria-live="polite">
+                <li className="procedure-message procedure-message-agent">
                   <span className="procedure-avatar" aria-hidden="true">
-                    AI
+                    <Bot size={16} />
                   </span>
-                  <p>
-                    {view.source.checkCount}件の確認と{view.source.evidenceCount}件の証跡から、
-                    {document.steps.length}手順の下書きを作成しました。
-                  </p>
-                </div>
+                  <div>
+                    <span className="sr-only">AI</span>
+                    <p>
+                      {view.source.checkCount}件の確認と{view.source.evidenceCount}件の証跡から、
+                      {document.steps.length}手順の下書きを作成しました。
+                    </p>
+                  </div>
+                </li>
                 {currentConversation.cursor !== undefined && onLoadPreviousConversation && (
-                  <Button
-                    variant="outline"
-                    disabled={currentConversation.busy}
-                    onClick={() => void loadPreviousConversation()}
-                  >
-                    過去の会話を表示
-                  </Button>
+                  <li>
+                    <Button
+                      variant="outline"
+                      disabled={currentConversation.busy}
+                      onClick={() => void loadPreviousConversation()}
+                    >
+                      過去の会話を表示
+                    </Button>
+                  </li>
                 )}
-                {currentConversation.busy && <p role="status">過去の会話を読み込んでいます…</p>}
-                {currentConversation.error && <p role="alert">{currentConversation.error}</p>}
+                {currentConversation.busy && <li role="status">過去の会話を読み込んでいます…</li>}
+                {currentConversation.error && <li role="alert">{currentConversation.error}</li>}
                 {[...currentConversation.items, ...view.conversation.items].map((item) => (
-                  <div
-                    className={`procedure-message ${item.role === "user" ? "procedure-message-user" : "procedure-message-ai"}`}
+                  <li
+                    className={`procedure-message procedure-message-${item.role}`}
                     key={item.messageId}
                   >
                     <span className="procedure-avatar" aria-hidden="true">
-                      {item.role === "user" ? "人" : "AI"}
+                      {item.role === "user" ? (
+                        <UserRound size={16} />
+                      ) : item.role === "system" ? (
+                        <Terminal size={16} />
+                      ) : (
+                        <Bot size={16} />
+                      )}
                     </span>
-                    <p>
-                      <strong className="sr-only">{item.role === "user" ? "あなた" : "AI"}</strong>
-                      {item.content
-                        .filter((part) => part.type === "text")
-                        .map((part) => part.text)
-                        .join(" ")}
-                    </p>
-                  </div>
+                    <div>
+                      <span className="sr-only">
+                        {item.role === "user"
+                          ? "あなた"
+                          : item.role === "system"
+                            ? "システム"
+                            : item.role === "thought"
+                              ? "思考"
+                              : "AI"}
+                      </span>
+                      <p>
+                        {item.role === "system" &&
+                          (item.status === "completed"
+                            ? "完了："
+                            : item.status === "failed"
+                              ? "失敗："
+                              : item.status === "interrupted"
+                                ? "中断："
+                                : "実行中：")}
+                        {item.content.map((part) => part.text ?? "添付").join("\n")}
+                      </p>
+                      {item.role !== "system" && item.status !== "completed" && (
+                        <small>{item.status}</small>
+                      )}
+                    </div>
+                  </li>
                 ))}
-              </div>
+                {view.activeRevision && (
+                  <li className="procedure-message procedure-message-agent" role="status">
+                    <span className="procedure-avatar" aria-hidden="true">
+                      <Bot size={16} />
+                    </span>
+                    <div>
+                      <p className="procedure-activity-status">
+                        <Spinner aria-hidden="true" /> AIが手順書を修正中
+                      </p>
+                    </div>
+                  </li>
+                )}
+              </ol>
               {editable && !view.activeRevision && (
                 <div className="procedure-suggestions">
                   <strong>修正を依頼できます</strong>
@@ -539,9 +588,6 @@ function ProcedureContent({
                       直接編集
                     </Button>
                   )}
-                  <Button variant="outline" onClick={onReload}>
-                    再取得
-                  </Button>
                 </div>
               </div>
               <div role="status" aria-live="polite">
@@ -611,29 +657,41 @@ function ProcedureContent({
                       .map((ref) => {
                         const summary = evidenceById.get(ref.evidenceId);
                         return summary ? (
-                          <div className="procedure-evidence-link" key={ref.evidenceId}>
-                            <span>{ref.displayName || summary.displayName}</span>
-                            <Button
-                              variant="link"
-                              aria-label={`${ref.displayName || summary.displayName}の証跡を見る`}
-                              onClick={() =>
-                                void openEvidence(
-                                  summary,
-                                  step.evidenceRefs
-                                    .filter(
-                                      (item) =>
-                                        item.included && item.evidenceId !== summary.evidenceId,
-                                    )
-                                    .map((item) => evidenceById.get(item.evidenceId))
-                                    .filter((item): item is EvidenceSummary => !!item),
-                                )
-                              }
-                            >
-                              証跡を見る
-                            </Button>
+                          <div key={ref.evidenceId}>
+                            <div className="procedure-evidence-link">
+                              <span>{ref.displayName || summary.displayName}</span>
+                            </div>
+                            {(summary.kind === "image" ||
+                              (summary.actor === "ai" && summary.kind === "text")) && (
+                              <EvidenceContent summary={summary} onLoadEvidence={onLoadEvidence} />
+                            )}
                           </div>
                         ) : null;
                       })}
+                    {step.evidenceRefs.some(
+                      (ref) => ref.included && evidenceById.has(ref.evidenceId),
+                    ) && (
+                      <Button
+                        variant="link"
+                        aria-label={`${step.title || `手順 ${index + 1}`}の証跡を見る`}
+                        onClick={() => {
+                          const items = step.evidenceRefs
+                            .filter((ref) => ref.included)
+                            .map((ref) => evidenceById.get(ref.evidenceId))
+                            .filter((item): item is EvidenceSummary => !!item);
+                          if (items[0])
+                            openEvidence(items[0], items.slice(1)).catch((cause) =>
+                              setEvidenceError(
+                                cause instanceof Error
+                                  ? cause.message
+                                  : "証跡を取得できませんでした。",
+                              ),
+                            );
+                        }}
+                      >
+                        証跡を見る
+                      </Button>
+                    )}
                   </section>
                 ))}
               </article>
@@ -996,7 +1054,7 @@ function ProcedureContent({
                           </p>
                           <p>確認日時: {detail.summary.createdAt}</p>
                           <p>整合性: {detail.integrity}</p>
-                          {actor === "ai" && (
+                          {actor === "ai" && !!detail.command && (
                             <>
                               <p>
                                 実行コマンド: <code>{detail.command}</code>
@@ -1060,6 +1118,49 @@ function ProcedureContent({
       </dialog>
     </main>
   );
+}
+
+function EvidenceContent({
+  summary,
+  onLoadEvidence,
+}: {
+  summary: EvidenceSummary;
+  onLoadEvidence: Props["onLoadEvidence"];
+}) {
+  const [detail, setDetail] = useState<EvidenceDetail>();
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let current = true;
+    onLoadEvidence(summary.evidenceId)
+      .then((detail) => {
+        if (current) {
+          setDetail(detail);
+          setFailed(
+            summary.kind === "image" ? !detail.image?.previewUrl : !detail.textPage?.content,
+          );
+        }
+      })
+      .catch(() => {
+        if (current) setFailed(true);
+      });
+    return () => {
+      current = false;
+    };
+  }, [summary.evidenceId, summary.kind, onLoadEvidence]);
+
+  return failed ? (
+    <p role="status">証跡を表示できません。証跡の詳細を確認してください。</p>
+  ) : detail?.image ? (
+    <figure className="procedure-evidence-preview">
+      <img
+        src={detail.image.previewUrl}
+        alt={detail.image.alt || summary.displayName}
+        onError={() => setFailed(true)}
+      />
+    </figure>
+  ) : detail?.textPage?.content ? (
+    <pre className="procedure-evidence-text">{detail.textPage.content}</pre>
+  ) : null;
 }
 
 function move<T>(items: T[], from: number, to: number): T[] {

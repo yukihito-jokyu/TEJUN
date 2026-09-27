@@ -73,6 +73,10 @@ function ProjectProcedure({ projectId }: { projectId: string }) {
   }, [projectId, refresh]);
 
   const procedureId = view?.procedure.procedureId ?? "";
+  const loadEvidence = useCallback(
+    (evidenceId: string, cursor?: string) => getProcedureEvidence(procedureId, evidenceId, cursor),
+    [procedureId],
+  );
   return (
     <ProcedurePage
       loading={loading}
@@ -104,7 +108,7 @@ function ProjectProcedure({ projectId }: { projectId: string }) {
           ? exportCompletedProcedure(view, format, revision, operationId)
           : Promise.resolve(false)
       }
-      onLoadEvidence={(evidenceId, cursor) => getProcedureEvidence(procedureId, evidenceId, cursor)}
+      onLoadEvidence={loadEvidence}
       onLoadPreviousConversation={async (cursor) =>
         (await getProcedure(projectId, cursor)).conversation
       }

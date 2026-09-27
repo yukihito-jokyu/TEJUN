@@ -1,8 +1,24 @@
 .procedure-page {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   color: var(--foreground);
   background: var(--background);
 }
+.procedure-page > [aria-busy] {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.procedure-page > [aria-busy] > [role="status"] {
+  flex: none;
+  margin: 0;
+}
 .procedure-header {
+  flex: none;
   min-height: 68px;
   padding: var(--ds-space-3) var(--ds-space-6);
   border-bottom: var(--ds-border-width-soft) solid var(--border);
@@ -10,6 +26,13 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--ds-space-4);
+}
+.procedure-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: var(--ds-space-4);
 }
 .procedure-brand,
@@ -53,10 +76,13 @@
 .procedure-layout {
   display: grid;
   grid-template-columns: minmax(290px, 34%) minmax(0, 1fr);
-  min-height: calc(100vh - 80px);
+  flex: 1;
+  min-height: 0;
 }
 .procedure-chat {
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: var(--ds-space-4);
@@ -91,8 +117,11 @@
 }
 .procedure-conversation {
   flex: 1;
-  min-height: 220px;
-  max-height: 60vh;
+  min-height: 140px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-x: hidden;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -103,31 +132,46 @@
   align-items: flex-start;
   gap: var(--ds-space-2);
 }
-.procedure-message p {
+.procedure-message > div {
+  min-width: 0;
   margin: 0;
   padding: var(--ds-space-3);
   border: var(--ds-border-width-soft) solid var(--border);
-  border-radius: var(--ds-radius-card);
+  border-radius: 4px var(--ds-radius-card) var(--ds-radius-card);
   background: var(--surface);
-  line-height: 1.6;
+}
+.procedure-message p {
+  margin: 0;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .procedure-message-user {
   flex-direction: row-reverse;
 }
-.procedure-message-user p {
+.procedure-message-user > div {
+  border-color: var(--primary);
+  border-radius: var(--ds-radius-card) var(--ds-radius-card) 4px var(--ds-radius-card);
   background: var(--primary);
   color: var(--primary-foreground);
 }
+.procedure-message small {
+  opacity: 0.75;
+}
+.procedure-activity-status {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+}
 .procedure-avatar {
   flex: none;
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   display: grid;
   place-items: center;
   border-radius: 50%;
+  border: var(--ds-border-width-soft) solid var(--border);
   background: var(--surface);
-  font-size: var(--ds-font-size-small);
-  font-weight: 700;
 }
 .procedure-suggestions {
   display: grid;
@@ -171,10 +215,16 @@
 }
 .procedure-workspace {
   min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: var(--ds-space-4);
   padding: var(--ds-space-6);
+}
+.procedure-workspace > * {
+  flex-shrink: 0;
 }
 .procedure-toolbar,
 .procedure-title-row,
@@ -290,6 +340,23 @@
   color: var(--muted-foreground);
   font-size: var(--ds-font-size-small);
 }
+.procedure-evidence-preview {
+  margin: var(--ds-space-3) 0 0;
+}
+.procedure-evidence-preview img {
+  display: block;
+  max-width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+}
+.procedure-evidence-text {
+  margin: var(--ds-space-3) 0 0;
+  padding: var(--ds-space-3);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--surface-soft);
+  border-radius: var(--ds-radius-control);
+}
 .procedure-completion {
   padding: var(--ds-space-4);
   border: var(--ds-border-width-soft) solid var(--border);
@@ -393,6 +460,7 @@
   }
   .procedure-layout {
     grid-template-columns: 1fr;
+    grid-template-rows: repeat(2, minmax(0, 1fr));
   }
   .procedure-chat {
     border-right: 0;
@@ -400,7 +468,6 @@
   }
   .procedure-conversation {
     min-height: 140px;
-    max-height: 300px;
   }
 }
 @media (max-width: 640px) {
