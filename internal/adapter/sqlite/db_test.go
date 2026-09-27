@@ -4,10 +4,30 @@ import (
 	"context"
 	"database/sql"
 	"io/fs"
+	"net/url"
+	"path/filepath"
 	"testing"
 
 	"github.com/pressly/goose/v3"
 )
+
+func TestDataSourceNameUsesLocalFileURI(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+
+	parsed, err := url.Parse(dataSourceName(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantPath := filepath.ToSlash(path)
+	if volume := filepath.VolumeName(path); len(volume) == 2 && volume[1] == ':' {
+		wantPath = "/" + wantPath
+	}
+
+	if parsed.Scheme != "file" || parsed.Host != "" || parsed.Path != wantPath {
+		t.Fatalf("database URI = %s, want local file path %s", parsed.String(), path)
+	}
+}
 
 func TestOpenUpgradesPreparationTurnColumns(t *testing.T) {
 	ctx := context.Background()
