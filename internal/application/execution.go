@@ -17,8 +17,18 @@ type ExecutionRepository interface {
 
 type Execution struct {
 	repository ExecutionRepository
-	now        func() time.Time
-	newID      func() string
+	activity   interface {
+		ExecutionActivity(string) *PreparationActivity
+	}
+	now   func() time.Time
+	newID func() string
+}
+
+func (e *Execution) SetActivityReader(reader interface {
+	ExecutionActivity(string) *PreparationActivity
+},
+) {
+	e.activity = reader
 }
 
 func NewExecution(repository ExecutionRepository, now func() time.Time, newID func() string) *Execution {
@@ -119,6 +129,7 @@ type EvidenceSummary struct {
 	EvidenceID  string    `json:"evidenceId"`
 	Actor       string    `json:"actor"`
 	Kind        string    `json:"kind"`
+	Text        string    `json:"text"`
 	DisplayName string    `json:"displayName"`
 	MimeType    string    `json:"mimeType"`
 	Size        int64     `json:"size"`
@@ -137,6 +148,7 @@ type ExecutionCheckView struct {
 	Title                    string        `json:"title"`
 	Instruction              string        `json:"instruction"`
 	ExpectedResult           string        `json:"expectedResult"`
+	SuggestedCommand         string        `json:"suggestedCommand"`
 	AI                       CheckSideView `json:"ai"`
 	Human                    CheckSideView `json:"human"`
 	HumanEvidenceRequirement string        `json:"humanEvidenceRequirement"`
@@ -188,12 +200,18 @@ type ExecutionView struct {
 	Checks             []ExecutionCheckView    `json:"checks"`
 	PendingPermissions []PermissionRequestView `json:"pendingPermissions"`
 	Conversation       ConversationPage        `json:"conversation"`
+	Activity           *PreparationActivity    `json:"activity"`
 	Readiness          ExecutionReadiness      `json:"readiness"`
 	ChangeSequence     int64                   `json:"changeSequence"`
 }
 
 func (e *Execution) GetView(ctx context.Context, query ExecutionViewQuery) (ExecutionView, error) {
-	return e.repository.GetExecutionView(ctx, query)
+	view, err := e.repository.GetExecutionView(ctx, query)
+	if err == nil && e.activity != nil && view.ActiveRun != nil {
+		view.Activity = e.activity.ExecutionActivity(view.Session.SessionID)
+	}
+
+	return view, err
 }
 
 func ExecutionCheckFromSnapshot(check execution.Check) ExecutionCheckView {
@@ -203,6 +221,7 @@ func ExecutionCheckFromSnapshot(check execution.Check) ExecutionCheckView {
 		Title:                    check.Title,
 		Instruction:              check.Instruction,
 		ExpectedResult:           check.ExpectedResult,
+		SuggestedCommand:         check.SuggestedCommand,
 		HumanEvidenceRequirement: check.HumanEvidenceRequirement,
 		Evidence:                 CheckEvidence{AI: []EvidenceSummary{}, Human: []EvidenceSummary{}},
 	}
@@ -210,8 +229,6 @@ func ExecutionCheckFromSnapshot(check execution.Check) ExecutionCheckView {
 	aiStatus := check.AIStatus
 	if !check.AIRequired && aiStatus == "pending" {
 		aiStatus = "not_required"
-	} else if aiStatus == "queued" {
-		aiStatus = "running"
 	}
 
 	item.AI = CheckSideView{
@@ -267,6 +284,7 @@ func EvidenceSummaryFromRecord(ev execution.Evidence) EvidenceSummary {
 		EvidenceID:  ev.ID,
 		Actor:       ev.Actor,
 		Kind:        ev.Kind,
+		Text:        ev.Text,
 		DisplayName: ev.DisplayName,
 		MimeType:    ev.MimeType,
 		Size:        ev.Size,

@@ -119,7 +119,7 @@ func validPreviewID(id string) bool {
 		if c < '0' || c > '9' {
 			if c < 'a' || c > 'z' {
 				if c < 'A' || c > 'Z' {
-					if c != '_' && c != '-' {
+					if c != '_' && c != '-' && c != ':' {
 						return false
 					}
 				}

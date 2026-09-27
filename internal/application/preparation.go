@@ -28,13 +28,33 @@ type PreparationRepository interface {
 
 type Preparation struct {
 	repository PreparationRepository
+	activity   PreparationActivityReader
 	now        func() time.Time
 	newID      func() string
 }
 
 func NewPreparation(repository PreparationRepository, now func() time.Time, newID func() string) *Preparation {
-	return &Preparation{repository, now, newID}
+	return &Preparation{repository: repository, now: now, newID: newID}
 }
+
+type PreparationActivityReader interface {
+	PreparationActivity(sessionID string) *PreparationActivity
+}
+
+type PreparationToolActivity struct {
+	ID        string `json:"id"`
+	MessageID string `json:"-"`
+	Title     string `json:"title"`
+	Status    string `json:"status"`
+}
+
+type PreparationActivity struct {
+	TurnID string             `json:"turnId"`
+	Phase  string             `json:"phase"`
+	Items  []ConversationItem `json:"items"`
+}
+
+func (p *Preparation) SetActivityReader(reader PreparationActivityReader) { p.activity = reader }
 
 type PreparationViewQuery struct {
 	ProjectID          string `json:"projectId"`
@@ -179,6 +199,7 @@ type PreparationView struct {
 	CheckPlan      CheckPlanView            `json:"checkPlan"`
 	Session        *SessionSummary          `json:"session"`
 	Conversation   ConversationPage         `json:"conversation"`
+	Activity       *PreparationActivity     `json:"activity,omitempty"`
 	Chats          []PreparationChat        `json:"chats"`
 	Elicitations   []ElicitationRequestView `json:"elicitations"`
 	Readiness      Readiness                `json:"readiness"`
@@ -427,7 +448,13 @@ func (p *Preparation) StartExecution(
 }
 
 func (p *Preparation) GetPreparation(ctx context.Context, in PreparationViewQuery) (PreparationView, error) {
-	return p.repository.GetPreparation(ctx, in)
+	view, err := p.repository.GetPreparation(ctx, in)
+	if err == nil && p.activity != nil && view.Session != nil &&
+		(in.ChatID == "" || in.ChatID == view.Session.SessionID) {
+		view.Activity = p.activity.PreparationActivity(view.Session.SessionID)
+	}
+
+	return view, err
 }
 
 type PreparationJobRepository interface {

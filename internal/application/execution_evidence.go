@@ -2,6 +2,8 @@ package application
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"time"
@@ -12,6 +14,7 @@ import (
 type AttachHumanEvidenceInput struct {
 	ExecutionID, CheckID, Kind, Text, SourcePath, DisplayName, OperationID string
 	ExpectedRevision                                                       int64
+	ImageData                                                              []byte
 }
 
 type StagedEvidence struct {
@@ -86,6 +89,12 @@ func (e *ExecutionEvidence) Attach(ctx context.Context,
 		return e.repository.AttachTextEvidence(ctx, record)
 	}
 
+	if len(input.ImageData) > 0 {
+		hash := sha256.Sum256(input.ImageData)
+		input.SourcePath = "upload:" + hex.EncodeToString(hash[:])
+		record.Input.SourcePath = input.SourcePath
+	}
+
 	prior, found, pending, err := e.repository.FindEvidenceOperation(ctx, input)
 	if err != nil {
 		return MutationResult[EvidenceAttached]{}, err
@@ -101,7 +110,27 @@ func (e *ExecutionEvidence) Attach(ctx context.Context,
 		}
 	}
 
-	staged, err := e.store.Stage(ctx, input.SourcePath)
+	sourcePath := input.SourcePath
+	if len(input.ImageData) > 0 {
+		file, err := os.CreateTemp("", "tejun-evidence-*")
+		if err != nil {
+			return MutationResult[EvidenceAttached]{}, err
+		}
+
+		sourcePath = file.Name()
+		defer func() { _ = os.Remove(sourcePath) }()
+
+		if _, err := file.Write(input.ImageData); err != nil {
+			_ = file.Close()
+			return MutationResult[EvidenceAttached]{}, err
+		}
+
+		if err := file.Close(); err != nil {
+			return MutationResult[EvidenceAttached]{}, err
+		}
+	}
+
+	staged, err := e.store.Stage(ctx, sourcePath)
 	if err != nil {
 		return MutationResult[EvidenceAttached]{}, err
 	}

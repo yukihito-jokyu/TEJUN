@@ -123,12 +123,14 @@ func Run(assets fs.FS) (runErr error) {
 	}
 
 	execution := appusecase.NewExecution(executionRepository, now, newID)
+	execution.SetActivityReader(manager)
 	executionRunner := appusecase.NewExecutionRunner(executionRepository, manager, now, newID)
 	executionPermission := appusecase.NewExecutionPermission(executionRepository, manager, now)
 
 	startup := appusecase.NewStartup(repository, appacp.NewCodexScanner(dataDir, now), manager, now, newID)
 	agentControl := appusecase.NewAgentControl(repository, manager, manager, now, newID)
 	preparation := appusecase.NewPreparation(preparationRepository, now, newID)
+	preparation.SetActivityReader(manager)
 	preparationAgentControl := appusecase.NewPreparationAgentControl(preparationRepository, manager, now, newID)
 	projects := appusecase.NewProjectUseCases(projectRepository, appworkspace.Validator{}, now, newID)
 	projectExternal := appusecase.NewProjectExternal(projectExternalRepository, exporter, now, newID)

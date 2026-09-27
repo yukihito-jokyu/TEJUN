@@ -21,7 +21,7 @@ func TestEvidencePreview(t *testing.T) {
 
 	preview, err := newEvidencePreview(
 		previewReaderFunc(func(_ context.Context, p, e, c, v string) ([]byte, string, error) {
-			if p != "project" || e != "execution" || c != "check" || v != "image" {
+			if p != "project" || e != "execution" || c != "check:1" || v != "image" {
 				return nil, "", errors.New("missing")
 			}
 
@@ -35,8 +35,8 @@ func TestEvidencePreview(t *testing.T) {
 
 	preview.now = func() time.Time { return now }
 
-	valid := preview.URL("project", "execution", "check", "image")
-	if valid == "" || preview.URL("../project", "execution", "check", "image") != "" {
+	valid := preview.URL("project", "execution", "check:1", "image")
+	if valid == "" || preview.URL("../project", "execution", "check:1", "image") != "" {
 		t.Fatal("invalid preview URL")
 	}
 
@@ -46,9 +46,14 @@ func TestEvidencePreview(t *testing.T) {
 	}{
 		{"valid", valid, http.MethodGet, http.StatusOK},
 		{"static asset", "/index.html", http.MethodGet, http.StatusAccepted},
-		{"other project", preview.URL("other", "execution", "check", "image"), http.MethodGet, http.StatusNotFound},
-		{"missing image", preview.URL("project", "execution", "check", "missing"), http.MethodGet, http.StatusNotFound},
-		{"tampered path", strings.Replace(valid, "/check/", "/other/", 1), http.MethodGet, http.StatusNotFound},
+		{"other project", preview.URL("other", "execution", "check:1", "image"), http.MethodGet, http.StatusNotFound},
+		{
+			"missing image",
+			preview.URL("project", "execution", "check:1", "missing"),
+			http.MethodGet,
+			http.StatusNotFound,
+		},
+		{"tampered path", strings.Replace(valid, "/check:1/", "/other/", 1), http.MethodGet, http.StatusNotFound},
 		{
 			"traversal",
 			"/evidence-preview/project/execution/../image" + valid[strings.IndexByte(valid, '?'):],

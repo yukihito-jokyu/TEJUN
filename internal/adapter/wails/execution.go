@@ -2,6 +2,7 @@ package wails
 
 import (
 	"context"
+	"encoding/base64"
 	"path/filepath"
 	"strings"
 	"time"
@@ -118,6 +119,7 @@ type AttachHumanEvidenceInput struct {
 	Kind             string `json:"kind"`
 	Text             string `json:"text,omitempty"`
 	SourcePath       string `json:"sourcePath,omitempty"`
+	ImageData        string `json:"imageData,omitempty"`
 	DisplayName      string `json:"displayName,omitempty"`
 	OperationID      string `json:"operationId"`
 }
@@ -309,15 +311,29 @@ func (s *ExecutionService) AttachHumanEvidence(
 
 	switch in.Kind {
 	case "text":
-		if strings.TrimSpace(in.Text) == "" || in.SourcePath != "" {
+		if strings.TrimSpace(in.Text) == "" || in.SourcePath != "" || in.ImageData != "" {
 			return MutationResult[EvidenceAttached]{}, validation(map[string]string{"text": "textとsourcePathを確認してください"})
 		}
 	case "image":
-		if !filepath.IsAbs(in.SourcePath) || in.Text != "" {
-			return MutationResult[EvidenceAttached]{}, validation(map[string]string{"sourcePath": "画像の絶対pathを指定してください"})
+		if in.Text != "" || (in.SourcePath == "") == (in.ImageData == "") ||
+			(in.SourcePath != "" && !filepath.IsAbs(in.SourcePath)) || len(in.ImageData) > 35<<20 {
+			return MutationResult[EvidenceAttached]{}, validation(
+				map[string]string{"sourcePath": "画像のパスまたはデータを指定してください"},
+			)
 		}
 	default:
 		return MutationResult[EvidenceAttached]{}, validation(map[string]string{"kind": "textかimageを指定してください"})
+	}
+
+	var imageData []byte
+
+	if in.ImageData != "" {
+		var err error
+
+		imageData, err = base64.StdEncoding.DecodeString(in.ImageData)
+		if err != nil || len(imageData) > 25<<20 {
+			return MutationResult[EvidenceAttached]{}, validation(map[string]string{"imageData": "画像データが不正か大きすぎます"})
+		}
 	}
 
 	result, err := s.evidence.Attach(
@@ -329,6 +345,7 @@ func (s *ExecutionService) AttachHumanEvidence(
 			Kind:             in.Kind,
 			Text:             in.Text,
 			SourcePath:       in.SourcePath,
+			ImageData:        imageData,
 			DisplayName:      in.DisplayName,
 			OperationID:      in.OperationID,
 		},
