@@ -4,9 +4,9 @@ import { onAppEvent, onSystemWake, parseAppError } from "@/shared/api/wails";
 import {
   getExecution,
   runPendingChecks,
-  sendExecutionMessage,
   setHumanCheck,
   attachHumanEvidence,
+  attachHumanImageEvidence,
   respondToExecutionPermission,
   generateProcedureDraft,
   type ExecutionView,
@@ -75,7 +75,7 @@ function ProjectExecution({ projectId }: { projectId: string }) {
   const activeRunId = view?.activeRun?.runId;
   useEffect(() => {
     if (!activeRunId) return;
-    const timer = window.setInterval(() => void refresh().catch(() => undefined), 2000);
+    const timer = window.setInterval(() => void refresh().catch(() => undefined), 500);
     return () => window.clearInterval(timer);
   }, [activeRunId, refresh]);
   const mutate = async (call: () => Promise<unknown>) => {
@@ -134,11 +134,6 @@ function ProjectExecution({ projectId }: { projectId: string }) {
         view &&
         void mutate(() => runPendingChecks(view.execution.executionId, view.execution.revision))
       }
-      onMessage={(text) =>
-        view
-          ? mutate(() => sendExecutionMessage(view.execution.executionId, text))
-          : Promise.resolve(false)
-      }
       onHumanCheck={(checkId, checked) =>
         view &&
         void mutate(() =>
@@ -155,6 +150,18 @@ function ProjectExecution({ projectId }: { projectId: string }) {
                 kind,
                 text,
                 path,
+              ),
+            )
+          : Promise.resolve(false)
+      }
+      onImageEvidence={(checkId, file) =>
+        view
+          ? mutate(() =>
+              attachHumanImageEvidence(
+                view.execution.executionId,
+                checkId,
+                view.execution.revision,
+                file,
               ),
             )
           : Promise.resolve(false)

@@ -16,7 +16,6 @@ vi.mock("@/shared/api/wails", () => ({
 vi.mock("@/shared/api/wails/execution", () => ({
   ...api,
   runPendingChecks: vi.fn(),
-  sendExecutionMessage: vi.fn(),
   setHumanCheck: vi.fn(),
   respondToExecutionPermission: vi.fn(),
 }));
