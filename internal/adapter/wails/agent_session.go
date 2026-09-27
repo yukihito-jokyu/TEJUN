@@ -2,9 +2,11 @@ package wails
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/yukihito-jokyu/TEJUN/internal/application"
+	"github.com/yukihito-jokyu/TEJUN/internal/domain/shared"
 )
 
 func (s *AgentControlService) CancelAgentOperation(
@@ -21,6 +23,21 @@ func (s *AgentControlService) CancelAgentOperation(
 		return MutationResult[CancellationAccepted]{}, validation(map[string]string{"turnId": "取消対象を指定してください"})
 	}
 
+	if s.execution != nil {
+		result, err := s.execution.CancelAgentOperation(ctx, application.CancelAgentOperationInput{
+			SessionID: input.SessionID, TurnID: input.TurnID, RunID: input.RunID,
+			JobID: input.JobID, OperationID: input.OperationID,
+		})
+		if err == nil {
+			return cancellationResult(result), nil
+		}
+
+		var appErr *shared.Error
+		if input.RunID != "" || !errors.As(err, &appErr) || appErr.Code != "not_found" {
+			return MutationResult[CancellationAccepted]{}, err
+		}
+	}
+
 	result, err := s.preparation.CancelAgentOperation(
 		ctx,
 		application.CancelAgentOperationInput{
@@ -35,15 +52,19 @@ func (s *AgentControlService) CancelAgentOperation(
 		return MutationResult[CancellationAccepted]{}, err
 	}
 
+	return cancellationResult(result), nil
+}
+
+func cancellationResult(
+	result application.MutationResult[application.CancellationAccepted],
+) MutationResult[CancellationAccepted] {
 	return MutationResult[CancellationAccepted]{
 		Data: CancellationAccepted{
-			JobID:        result.Data.JobID,
-			TargetStatus: result.Data.TargetStatus,
-			RequestedAt:  result.Data.RequestedAt.Format(time.RFC3339Nano),
-			Mechanism:    result.Data.Mechanism,
-		},
-		Receipt: receipt(result.Receipt),
-	}, nil
+			JobID: result.Data.JobID, TargetStatus: result.Data.TargetStatus,
+			RequestedAt: result.Data.RequestedAt.Format(time.RFC3339Nano),
+			Mechanism:   result.Data.Mechanism,
+		}, Receipt: receipt(result.Receipt),
+	}
 }
 
 func (s *AgentControlService) SetAgentSessionConfiguration(

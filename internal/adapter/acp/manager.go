@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"sort"
@@ -41,6 +42,8 @@ type Manager struct {
 	checks          map[string]probeCheck
 	projectSessions map[string]*projectSession
 	elicitations    map[string]chan application.ElicitationResponse
+	permissions     map[string]*pendingPermission
+	permissionStore application.PermissionRepository
 	sink            application.ElicitationSink
 	now             func() time.Time
 	newID           func() string
@@ -55,19 +58,22 @@ type probeCheck struct {
 }
 
 type session struct {
-	process         *process
-	connection      *sdk.ClientSideConnection
-	agentSessionID  sdk.SessionId
-	pendingTurnID   string
-	pendingTurnDone chan struct{}
-	cancelTimedOut  bool
-	messages        []application.ConversationItem
-	modes           *application.SessionModes
-	configOptions   []application.SessionConfigOption
-	receiveSequence int64
-	probe           agentconnection.Probe
-	methods         map[string]authMethod
-	input           agentconnection.ConnectionInput
+	process               *process
+	connection            *sdk.ClientSideConnection
+	agentSessionID        sdk.SessionId
+	pendingTurnID         string
+	pendingExecutionJobID string
+	pendingExecutionID    string
+	pendingRunID          string
+	pendingTurnDone       chan struct{}
+	cancelTimedOut        bool
+	messages              []application.ConversationItem
+	modes                 *application.SessionModes
+	configOptions         []application.SessionConfigOption
+	receiveSequence       int64
+	probe                 agentconnection.Probe
+	methods               map[string]authMethod
+	input                 agentconnection.ConnectionInput
 }
 
 type authMethod struct {
@@ -83,6 +89,7 @@ func NewManager(sink application.ElicitationSink, now func() time.Time, newID fu
 		sessions: make(map[string]*session), checks: make(map[string]probeCheck),
 		projectSessions: make(map[string]*projectSession),
 		elicitations:    make(map[string]chan application.ElicitationResponse),
+		permissions:     make(map[string]*pendingPermission),
 		sink:            sink, now: now, newID: newID, lifecycle: lifecycle, cancel: cancel,
 	}
 }
@@ -138,7 +145,11 @@ func (m *Manager) Check(
 	probeID := m.newID()
 	generation := m.generation.Add(1)
 	client := &client{manager: m, attemptID: probeID, generation: generation}
-	connection := sdk.NewClientSideConnection(client, proc.stdin, stdout)
+	connection := sdk.NewClientSideConnection(
+		client,
+		&permissionWriter{target: proc.stdin, manager: m, generation: generation},
+		permissionReader(stdout),
+	)
 
 	response, err := connection.Initialize(initializeContext, sdk.InitializeRequest{
 		ProtocolVersion:    sdk.ProtocolVersionNumber,
@@ -471,7 +482,24 @@ func (m *Manager) closeOwnedSession(id string, owner *session) error {
 		return nil
 	}
 
-	return s.process.close()
+	err := s.process.close()
+
+	m.mu.Lock()
+	for permissionID, permission := range m.permissions {
+		if permission.generation == s.probe.ProcessGeneration {
+			if permission.claimed {
+				select {
+				case permission.written <- io.ErrClosedPipe:
+				default:
+				}
+			}
+
+			delete(m.permissions, permissionID)
+		}
+	}
+	m.mu.Unlock()
+
+	return err
 }
 
 func buildEnvironment(overrides []agentconnection.EnvironmentVariable, terminal map[string]string) []string {

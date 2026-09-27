@@ -171,3 +171,63 @@ func TestBindingValidation(t *testing.T) {
 func validConnection() AgentConnectionInput {
 	return AgentConnectionInput{DisplayName: "Agent", Command: "agent", Transport: "stdio"}
 }
+
+func TestExecutionBindingValidation(t *testing.T) {
+	service := &ExecutionService{}
+
+	tests := []struct {
+		name string
+		call func() error
+	}{
+		{"run required", func() error {
+			_, err := service.RunPendingChecks(context.Background(), RunPendingChecksInput{})
+			return err
+		}},
+		{"message content", func() error {
+			_, err := service.SendExecutionMessage(
+				context.Background(),
+				SendExecutionMessageInput{ExecutionID: "e", OperationID: "op"},
+			)
+
+			return err
+		}},
+		{"permission option", func() error {
+			_, err := service.RespondToPermissionRequest(
+				context.Background(),
+				PermissionResponseInput{SessionID: "s", PermissionRequestID: "p", OperationID: "op"},
+			)
+
+			return err
+		}},
+		{"image absolute path", func() error {
+			_, err := service.AttachHumanEvidence(
+				context.Background(),
+				AttachHumanEvidenceInput{
+					ExecutionID: "e",
+					CheckID:     "c",
+					Kind:        "image",
+					SourcePath:  "relative.png",
+					OperationID: "op",
+				},
+			)
+
+			return err
+		}},
+		{
+			"check required",
+			func() error { _, err := service.SetHumanCheck(context.Background(), SetHumanCheckInput{}); return err },
+		},
+		{"generation required", func() error {
+			_, err := service.GenerateProcedureDraft(context.Background(), GenerateProcedureDraftInput{})
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var appErr *shared.Error
+			if err := tt.call(); !errors.As(err, &appErr) || appErr.Code != "validation_failed" {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
+}

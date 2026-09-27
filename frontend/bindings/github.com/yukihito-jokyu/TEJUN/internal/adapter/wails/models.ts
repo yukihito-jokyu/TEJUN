@@ -86,6 +86,17 @@ export interface ArchivedProject {
     "archivedAt": string;
 }
 
+export interface AttachHumanEvidenceInput {
+    "executionId": string;
+    "checkId": string;
+    "expectedRevision": number;
+    "kind": string;
+    "text"?: string;
+    "sourcePath"?: string;
+    "displayName"?: string;
+    "operationId": string;
+}
+
 export interface AuthMethodView {
     "type": string;
     "authMethodId": string;
@@ -147,6 +158,13 @@ export interface CheckItemInput {
     "aiRequired": boolean;
     "humanRequired": boolean;
     "humanEvidenceRequirement": string;
+}
+
+export interface CheckUpdate {
+    "executionId": string;
+    "check": application$0.ExecutionCheckView;
+    "executionRevision": number;
+    "readiness": ExecutionReadiness;
 }
 
 export interface CompleteSetupInput {
@@ -211,6 +229,35 @@ export interface EnvironmentVariableInput {
     "value": string;
 }
 
+export interface EvidenceAttached {
+    "executionId": string;
+    "checkId": string;
+    "evidence": application$0.EvidenceSummary;
+    "executionRevision": number;
+    "readiness": ExecutionReadiness;
+}
+
+export interface ExecutionJobAccepted {
+    "executionId": string;
+    "runId"?: string;
+    "turnId"?: string;
+    "sessionId": string;
+    "jobId": string;
+    "acceptedAt": string;
+    "targetedCheckIds": string[] | null;
+}
+
+export interface ExecutionReadiness {
+    "canGenerateProcedure": boolean;
+    "blockingReasons": string[] | null;
+}
+
+export interface ExecutionViewQuery {
+    "projectId": string;
+    "conversationCursor"?: number | null;
+    "conversationLimit": number;
+}
+
 export interface ExportAccepted {
     "exportId": string;
     "jobId": string;
@@ -227,6 +274,12 @@ export interface ExportProcedureInput {
     "destination": VerifiedPathSelection;
     "overwriteConfirmed": boolean;
     "overwriteIdentity": OverwriteIdentity | null;
+    "operationId": string;
+}
+
+export interface GenerateProcedureDraftInput {
+    "executionId": string;
+    "expectedRevision": number;
     "operationId": string;
 }
 
@@ -266,6 +319,20 @@ export interface OverwriteIdentity {
     "inode": number;
 }
 
+export interface PermissionResponseInput {
+    "sessionId": string;
+    "permissionRequestId": string;
+    "optionId": string;
+    "operationId": string;
+}
+
+export interface PermissionResponseResult {
+    "permissionRequestId": string;
+    "status": string;
+    "selectedOptionId": string;
+    "respondedAt": string;
+}
+
 export interface PreparationBriefInput {
     "purpose": string;
     "completionCriteria": string[] | null;
@@ -290,6 +357,12 @@ export interface PreparedExportProcedure {
     "overwriteIdentity": OverwriteIdentity | null;
     "destinationDisplayName": string;
     "overwriteRequired": boolean;
+}
+
+export interface ProcedureGenerationAccepted {
+    "procedureId": string;
+    "nextRoute": string;
+    "acceptedAt": string;
 }
 
 export interface ProjectListQuery {
@@ -347,6 +420,13 @@ export interface RespondToElicitationInput {
     "operationId": string;
 }
 
+export interface RunPendingChecksInput {
+    "executionId": string;
+    "expectedRevision": number;
+    "checkIds"?: string[] | null;
+    "operationId": string;
+}
+
 export interface SaveCheckPlanInput {
     "projectId": string;
     "expectedPreparationRevision": number;
@@ -367,6 +447,12 @@ export interface SaveSessionPermissionPolicyInput {
     "expectedSessionRevision": number;
     "operationId": string;
     "mode": string;
+}
+
+export interface SendExecutionMessageInput {
+    "executionId": string;
+    "content": application$0.ContentPart[] | null;
+    "operationId": string;
 }
 
 export interface SendPreparationMessageInput {
@@ -390,6 +476,14 @@ export interface SetAgentSessionConfigurationInput {
     "expectedRevision": number;
     "operationId": string;
     "change": AgentSessionConfigurationChange;
+}
+
+export interface SetHumanCheckInput {
+    "executionId": string;
+    "checkId": string;
+    "checked": boolean;
+    "expectedRevision": number;
+    "operationId": string;
 }
 
 export interface StartExecutionInput {

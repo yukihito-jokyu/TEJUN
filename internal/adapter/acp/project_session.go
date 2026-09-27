@@ -54,7 +54,7 @@ func (m *Manager) ConnectProject(
 	connection := sdk.NewClientSideConnection(&client{
 		manager: m, attemptID: job.SessionID,
 		generation: generation,
-	}, proc.stdin, stdout)
+	}, &permissionWriter{target: proc.stdin, manager: m, generation: generation}, permissionReader(stdout))
 
 	response, err := connection.Initialize(initializeContext, sdk.InitializeRequest{
 		ProtocolVersion:    sdk.ProtocolVersionNumber,

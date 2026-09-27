@@ -193,7 +193,11 @@ test("briefとplanを保存し、開始routeへ進む", async ({ page }) => {
   await page.getByRole("button", { name: "チェック案を保存" }).click();
   await page.getByRole("button", { name: "動作チェックを開始" }).click();
   await expect(page).toHaveURL(/#\/projects\/p\/check$/);
-  expect(calls.map((call) => call.method)).toEqual([method.brief, method.plan, method.start]);
+  expect(calls.filter((call) => call.method !== 3565193614).map((call) => call.method)).toEqual([
+    method.brief,
+    method.plan,
+    method.start,
+  ]);
   expect(calls[1].input).toMatchObject({ expectedPreparationRevision: 2, expectedPlanRevision: 1 });
   expect(calls[2].input).toMatchObject({ expectedPreparationRevision: 2, expectedPlanRevision: 2 });
 });

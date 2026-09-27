@@ -131,7 +131,7 @@ func (m *Manager) ExecutePreparation(
 			}
 		}
 
-		parts := []sdk.ContentBlock{{Text: &sdk.ContentBlockText{Type: "text", Text: preparationInstruction}}}
+		parts := make([]sdk.ContentBlock, 0, len(job.Content)+1)
 		for _, part := range job.Content {
 			switch part.Type {
 			case "text":
@@ -152,6 +152,8 @@ func (m *Manager) ExecutePreparation(
 			}
 		}
 
+		parts = append(parts, sdk.ContentBlock{Text: &sdk.ContentBlockText{Type: "text", Text: preparationInstruction}})
+
 		m.mu.Lock()
 		s.pendingTurnID = job.TurnID
 		s.pendingTurnDone = make(chan struct{})
@@ -164,7 +166,6 @@ func (m *Manager) ExecutePreparation(
 		m.mu.Lock()
 
 		completed.Messages = append([]application.ConversationItem(nil), s.messages...)
-		completed.BriefSuggestion = takeBriefSuggestion(completed.Messages)
 		timedOut := s.cancelTimedOut
 		close(s.pendingTurnDone)
 		s.pendingTurnDone = nil
@@ -180,6 +181,8 @@ func (m *Manager) ExecutePreparation(
 			return completed, acpError(err, "prompt")
 		}
 
+		completed.BriefSuggestion = takeBriefSuggestion(completed.Messages)
+		completed.Messages = m.preparationReply(completed.Messages, completed.BriefSuggestion, job.TurnID)
 		completed.AgentSessionID = string(s.agentSessionID)
 		completed.StopReason = string(response.StopReason)
 		completed.Success = true
@@ -240,22 +243,34 @@ func (m *Manager) ExecutePreparation(
 	}
 }
 
-const preparationInstruction = "あなたは手順書の準備を支援します。通常の返答の末尾に、会話から確実に分かる準備内容の変更だけを ```tejun-preparation で始まるJSONコードブロックとして付けてください。キーは purpose（目的）, completionCriteria（完了条件の文字列配列）, intendedUsers（想定利用者）, checkItems（動作チェック案の配列）です。checkItems の各要素は title, instruction, expectedResult, suggestedCommand を持ちます。チェック案を変更する場合は全項目を出してください。不明なキーは省略し、推測で埋めないでください。変更がなければコードブロックは不要です。"
+const preparationInstruction = `あなたは手順書の準備担当です。利用者が作りたい手順書について、作業場所のREADME、Taskfile、依存関係、設定などを読み取り、必要なら公式資料も調べ、右側の目的・完了条件・想定利用者・動作チェック案を具体化してください。調査は読み取りに限り、インストール、build、起動、ファイル編集など手順書に書く作業を今ここで実行しないでください。
+調査環境で既に導入済みのツールや依存関係を、手順書を使う人にもあると仮定しないでください。初めて構築する人がゼロから再現できるよう、必要なツールとその導入方法、依存関係の導入、設定、起動・検証を調べてください。OSや前提が資料から特定できなければ明示し、推測で埋めないでください。
+目的は作る手順書の対象、完了条件は手順全体の最終的な到達状態です。動作チェック案は、その手順書を組み立てるための順序付きの確認項目であり、完了条件を一件のチェックへ言い換えたものではありません。前提ツール、導入、設定、起動など必要な段階を過不足なく分け、各項目のinstructionに実施内容、expectedResultに観測できる結果を書いてください。たとえばtask devが完了条件でも、それだけを唯一の確認項目にしないでください。
+まず自分で調べ、分かった内容をまとめて提案してください。一問一答を進めず、資料から解決できない重要な不明点が残る場合だけ、関連する質問をまとめて尋ねてください。通常の説明の末尾には毎回、言語名をtejun-preparationとしたMarkdownのJSONコードブロックを付けてください。キーはpurpose、completionCriteria（文字列配列）、intendedUsers、checkItems（全項目の配列）、question（必要な質問）です。checkItemsの各要素はtitle、instruction、expectedResult、suggestedCommandを持ちます。変更のないキーは省略し、既存の案を変更する場合はcheckItemsを全件返してください。`
+
+const preparationFallbackMessage = "AIの返答を準備項目へ反映できませんでした。もう一度依頼してください。"
 
 func takeBriefSuggestion(messages []application.ConversationItem) *application.PreparationBriefSuggestion {
-	for i := range messages {
+	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i].Role != "agent" || len(messages[i].Content) == 0 {
 			continue
 		}
 
 		message := &messages[i].Content[0].Text
 
-		start := strings.Index(*message, "```tejun-preparation\n")
+		start := strings.Index(*message, "```tejun-preparation")
 		if start < 0 {
 			continue
 		}
 
-		bodyStart := start + len("```tejun-preparation\n")
+		bodyStart := start + len("```tejun-preparation")
+
+		lineEnd := strings.IndexByte((*message)[bodyStart:], '\n')
+		if lineEnd < 0 {
+			continue
+		}
+
+		bodyStart += lineEnd + 1
 
 		end := strings.Index((*message)[bodyStart:], "```")
 		if end < 0 || end > 16384 {
@@ -270,15 +285,51 @@ func takeBriefSuggestion(messages []application.ConversationItem) *application.P
 			continue
 		}
 
+		suggestion.Question = strings.TrimSpace(suggestion.Question)
+
 		*message = strings.TrimSpace((*message)[:start] + (*message)[bodyStart+end+3:])
 
 		if suggestion.Purpose != "" || suggestion.IntendedUsers != "" || len(suggestion.CompletionCriteria) > 0 ||
-			len(suggestion.CheckItems) > 0 {
+			len(suggestion.CheckItems) > 0 || suggestion.Question != "" {
 			return &suggestion
 		}
 	}
 
 	return nil
+}
+
+func (m *Manager) preparationReply(
+	messages []application.ConversationItem,
+	suggestion *application.PreparationBriefSuggestion,
+	turnID string,
+) []application.ConversationItem {
+	for i := len(messages) - 1; i >= 0; i-- {
+		message := messages[i]
+		if message.Role != "agent" || len(message.Content) == 0 {
+			continue
+		}
+
+		reply := preparationFallbackMessage
+		if suggestion != nil {
+			reply = strings.TrimSpace(message.Content[0].Text)
+			if reply == "" {
+				reply = strings.TrimSpace(suggestion.Question)
+			}
+
+			if reply == "" {
+				reply = "準備内容の案を整理しました。"
+			}
+		}
+
+		message.Content = []application.ContentPart{{Type: "text", Text: reply}}
+
+		return []application.ConversationItem{message}
+	}
+
+	return []application.ConversationItem{{
+		MessageID: m.newID(), TurnID: turnID, Role: "agent", Status: "completed", CreatedAt: m.now(),
+		Content: []application.ContentPart{{Type: "text", Text: preparationFallbackMessage}},
+	}}
 }
 
 func (m *Manager) SetConfiguration(

@@ -170,7 +170,7 @@ func TestPreparationACPJob(t *testing.T) {
 			}
 
 			if tt.name == "turn" &&
-				(result.StopReason != tt.want || len(result.Messages) != 1 || result.Messages[0].Content[0].Text != "reply") {
+				(result.StopReason != tt.want || len(result.Messages) != 1 || result.Messages[0].Content[0].Text != preparationFallbackMessage) {
 				t.Fatalf("turn result = %+v", result)
 			}
 		})
@@ -542,17 +542,48 @@ func TestFakeACPProcess(t *testing.T) {
 
 	var pendingPrompt json.RawMessage
 
+	promptCount := 0
+
 	for reader.Scan() {
 		var request struct {
 			JSONRPC string          `json:"jsonrpc"`
 			ID      json.RawMessage `json:"id"`
 			Method  string          `json:"method"`
+			Result  json.RawMessage `json:"result"`
 		}
 		if err := json.Unmarshal(reader.Bytes(), &request); err != nil {
 			os.Exit(2)
 		}
 
 		var result any = struct{}{}
+
+		if os.Getenv("FAKE_ACP_MODE") == "execution_permission" &&
+			string(request.ID) == `"permission-request"` && len(request.Result) != 0 {
+			var response struct {
+				Outcome struct {
+					OptionID string `json:"optionId"`
+				} `json:"outcome"`
+			}
+			if json.Unmarshal(request.Result, &response) != nil || response.Outcome.OptionID != "allow" {
+				os.Exit(5)
+			}
+
+			_ = encoder.Encode(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{
+				"sessionId": "agent-session", "update": map[string]any{
+					"sessionUpdate": "agent_message_chunk", "content": map[string]any{
+						"type": "text",
+						"text": `{"results":[{"checkId":"c","status":"completed","evidence":"permission granted"}]}`,
+					},
+				},
+			}})
+			_ = encoder.Encode(map[string]any{
+				"jsonrpc": "2.0", "id": pendingPrompt,
+				"result": map[string]any{"stopReason": "end_turn"},
+			})
+			pendingPrompt = nil
+
+			continue
+		}
 
 		if request.Method == "initialize" {
 			if os.Getenv("FAKE_ACP_MODE") == "exit" {
@@ -594,9 +625,39 @@ func TestFakeACPProcess(t *testing.T) {
 		}
 
 		if request.Method == "session/prompt" {
+			promptCount++
+
+			if marker := os.Getenv("FAKE_ACP_PROMPT_MARKER"); marker != "" {
+				_ = os.WriteFile(marker, []byte("prompt received"), 0o600)
+			}
+
 			if os.Getenv("FAKE_ACP_MODE") == "block_prompt" || os.Getenv("FAKE_ACP_MODE") == "ignore_cancel" {
 				pendingPrompt = append([]byte(nil), request.ID...)
 				continue
+			}
+
+			if os.Getenv("FAKE_ACP_MODE") == "execution_permission" {
+				pendingPrompt = append([]byte(nil), request.ID...)
+				_ = encoder.Encode(map[string]any{
+					"jsonrpc": "2.0", "id": "permission-request",
+					"method": "session/request_permission", "params": map[string]any{
+						"sessionId": "agent-session", "toolCall": map[string]any{
+							"toolCallId": "read-call", "title": "Read file", "kind": "read",
+						},
+						"options": []map[string]any{{"optionId": "allow", "name": "Allow once", "kind": "allow_once"}},
+					},
+				})
+
+				continue
+			}
+
+			answer := "reply"
+			if os.Getenv("FAKE_ACP_MODE") == "execution_checks" {
+				answer = `{"results":[{"checkId":"c","status":"completed","evidence":"fake ACP observed result"}]}`
+			}
+
+			if os.Getenv("FAKE_ACP_MODE") == "execution_late_chunk" && promptCount == 2 {
+				answer = "stale"
 			}
 
 			_ = encoder.Encode(
@@ -607,11 +668,28 @@ func TestFakeACPProcess(t *testing.T) {
 						"sessionId": "agent-session",
 						"update": map[string]any{
 							"sessionUpdate": "agent_message_chunk",
-							"content":       map[string]any{"type": "text", "text": "reply"},
+							"content":       map[string]any{"type": "text", "text": answer},
 						},
 					},
 				},
 			)
+			if os.Getenv("FAKE_ACP_MODE") == "execution_late_chunk" && promptCount == 2 {
+				_ = encoder.Encode(
+					map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{
+						"sessionId": "agent-session", "update": map[string]any{
+							"sessionUpdate": "agent_message_chunk", "content": map[string]any{
+								"type": "text",
+								"text": `{"results":[{"checkId":"c","status":"completed","evidence":"new result"}]}`,
+							},
+						},
+					}},
+				)
+			}
+
+			if os.Getenv("FAKE_ACP_MODE") == "execution_checks" {
+				time.Sleep(10 * time.Millisecond)
+			}
+
 			result = map[string]any{"stopReason": "end_turn"}
 		}
 

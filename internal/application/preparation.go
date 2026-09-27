@@ -469,6 +469,7 @@ type PreparationBriefSuggestion struct {
 	CompletionCriteria []string                     `json:"completionCriteria"`
 	IntendedUsers      string                       `json:"intendedUsers"`
 	CheckItems         []PreparationCheckSuggestion `json:"checkItems"`
+	Question           string                       `json:"question"`
 }
 type PreparationCheckSuggestion struct {
 	Title            string `json:"title"`

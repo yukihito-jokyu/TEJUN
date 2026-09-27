@@ -60,6 +60,7 @@ func dataSourceName(path string) string {
 	fileURL := (&url.URL{Scheme: "file", Path: filepath.ToSlash(path)}).String()
 
 	return fileURL + "?" + strings.Join([]string{
+		"_txlock=immediate",
 		"_pragma=foreign_keys(1)",
 		"_pragma=journal_mode(WAL)",
 		"_pragma=synchronous(FULL)",

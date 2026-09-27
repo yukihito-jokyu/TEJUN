@@ -25,8 +25,11 @@ func (client) WriteTextFile(context.Context, sdk.WriteTextFileRequest) (sdk.Writ
 	return sdk.WriteTextFileResponse{}, errUnsupportedClientOperation
 }
 
-func (client) RequestPermission(context.Context, sdk.RequestPermissionRequest) (sdk.RequestPermissionResponse, error) {
-	return sdk.RequestPermissionResponse{}, errUnsupportedClientOperation
+func (c client) RequestPermission(
+	ctx context.Context,
+	request sdk.RequestPermissionRequest,
+) (sdk.RequestPermissionResponse, error) {
+	return c.requestPermission(ctx, request)
 }
 
 func (c client) SessionUpdate(ctx context.Context, notification sdk.SessionNotification) error {

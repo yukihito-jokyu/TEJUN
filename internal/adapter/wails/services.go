@@ -11,13 +11,20 @@ import (
 )
 
 type (
-	StartupService      struct{ startup *application.Startup }
-	PreparationService  struct{ preparation *application.Preparation }
-	ExecutionService    struct{}
+	StartupService     struct{ startup *application.Startup }
+	PreparationService struct{ preparation *application.Preparation }
+	ExecutionService   struct {
+		execution  *application.Execution
+		runner     *application.ExecutionRunner
+		permission *application.ExecutionPermission
+		evidence   *application.ExecutionEvidence
+		previewURL func(string, string, string, string) string
+	}
 	ProcedureService    struct{}
 	AgentControlService struct {
 		control     *application.AgentControl
 		preparation *application.PreparationAgentControl
+		execution   *application.ExecutionRunner
 	}
 )
 
@@ -25,11 +32,22 @@ func NewStartupService(startup *application.Startup) *StartupService {
 	return &StartupService{startup: startup}
 }
 
+func NewExecutionService(execution *application.Execution, runner *application.ExecutionRunner,
+	permission *application.ExecutionPermission, evidence *application.ExecutionEvidence,
+	previewURL func(string, string, string, string) string,
+) *ExecutionService {
+	return &ExecutionService{
+		execution: execution, runner: runner, permission: permission, evidence: evidence,
+		previewURL: previewURL,
+	}
+}
+
 func NewAgentControlService(
 	control *application.AgentControl,
 	preparation *application.PreparationAgentControl,
+	execution *application.ExecutionRunner,
 ) *AgentControlService {
-	return &AgentControlService{control: control, preparation: preparation}
+	return &AgentControlService{control: control, preparation: preparation, execution: execution}
 }
 
 type EnvironmentVariableInput struct {
