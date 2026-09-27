@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io/fs"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -70,6 +71,8 @@ func Run(assets fs.FS) (runErr error) {
 
 	exporter := appexport.NewExporter()
 
+	var previewReader previewReader
+
 	if appsqlite.SupportsEvidencePath() {
 		evidence, err := appsqlite.NewEvidenceStore(db, dataDir)
 		if err != nil {
@@ -79,6 +82,7 @@ func Run(assets fs.FS) (runErr error) {
 		defer func() { runErr = errors.Join(runErr, evidence.Close()) }()
 
 		projectRepository.SetEvidenceStore(evidence)
+		previewReader = evidence
 
 		if err := evidence.Reconcile(context.Background()); err != nil {
 			return err
@@ -96,6 +100,32 @@ func Run(assets fs.FS) (runErr error) {
 	defer func() { runErr = errors.Join(runErr, exporter.Close()) }()
 
 	manager := appacp.NewManager(repository, now, newID)
+	executionRepository := appsqlite.NewExecutionRepository(db)
+	manager.SetPermissionRepository(executionRepository)
+
+	if err := executionRepository.FailInterruptedExecutionJobs(context.Background(), now()); err != nil {
+		return err
+	}
+
+	if err := executionRepository.FailInterruptedPermissions(context.Background(), now()); err != nil {
+		return err
+	}
+
+	evidenceFiles, err := appsqlite.OpenEvidenceFiles(dataDir)
+	if err != nil {
+		return err
+	}
+	defer func() { runErr = errors.Join(runErr, evidenceFiles.Close()) }()
+
+	executionEvidence := appusecase.NewExecutionEvidence(executionRepository, evidenceFiles, now, newID)
+	if err := executionEvidence.Reconcile(context.Background()); err != nil {
+		return err
+	}
+
+	execution := appusecase.NewExecution(executionRepository, now, newID)
+	executionRunner := appusecase.NewExecutionRunner(executionRepository, manager, now, newID)
+	executionPermission := appusecase.NewExecutionPermission(executionRepository, manager, now)
+
 	startup := appusecase.NewStartup(repository, appacp.NewCodexScanner(dataDir, now), manager, now, newID)
 	agentControl := appusecase.NewAgentControl(repository, manager, manager, now, newID)
 	preparation := appusecase.NewPreparation(preparationRepository, now, newID)
@@ -105,32 +135,49 @@ func Run(assets fs.FS) (runErr error) {
 	projectService := appwails.NewProjectService(projects, projectExternal)
 	projectService.SetTrace(traceWriter)
 
+	agentControlService := appwails.NewAgentControlService(agentControl, preparationAgentControl, executionRunner)
+
 	serviceOptions := application.ServiceOptions{MarshalError: appwails.MarshalError}
+	assetHandler := http.Handler(application.AssetFileServerFS(assets))
+
+	var previewURL func(string, string, string, string) string
+
+	if previewReader != nil {
+		preview, err := newEvidencePreview(previewReader, assetHandler)
+		if err != nil {
+			return err
+		}
+
+		assetHandler = preview
+		previewURL = preview.URL
+	}
+
+	executionService := appwails.NewExecutionService(execution, executionRunner, executionPermission, executionEvidence,
+		previewURL)
+
 	app := application.New(application.Options{
 		Name: "TEJUN",
 		Services: []application.Service{
 			application.NewServiceWithOptions(appwails.NewStartupService(startup), serviceOptions),
 			application.NewServiceWithOptions(projectService, serviceOptions),
 			application.NewServiceWithOptions(appwails.NewPreparationService(preparation), serviceOptions),
-			application.NewServiceWithOptions(&appwails.ExecutionService{}, serviceOptions),
+			application.NewServiceWithOptions(executionService, serviceOptions),
 			application.NewServiceWithOptions(&appwails.ProcedureService{}, serviceOptions),
-			application.NewServiceWithOptions(
-				appwails.NewAgentControlService(agentControl, preparationAgentControl),
-				serviceOptions,
-			),
+			application.NewServiceWithOptions(agentControlService, serviceOptions),
 		},
-		Assets: application.AssetOptions{Handler: application.AssetFileServerFS(assets)},
+		Assets: application.AssetOptions{Handler: assetHandler},
 		Mac:    application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: true},
 	})
 	workerContext, cancelWorkers := context.WithCancel(trace.WithWriter(context.Background(), traceWriter))
 
 	var workers sync.WaitGroup
 
-	workers.Add(5)
+	workers.Add(6)
 	go runAgentWorker(workerContext, &workers, repository, manager, now)
 	go runProjectWorker(workerContext, &workers, projectExternalRepository, manager, exporter, now)
 	go runPreparationWorker(workerContext, &workers, preparationRepository, manager, now)
 	go runPreparationCancellationWorker(workerContext, &workers, preparationRepository, manager, now)
+	go runExecutionWorker(workerContext, &workers, executionRunner)
 	go runEventDispatcher(workerContext, &workers, repository, app.Event.Emit, now)
 
 	app.OnShutdown(func() {
@@ -143,6 +190,22 @@ func Run(assets fs.FS) (runErr error) {
 	app.Window.NewWithOptions(application.WebviewWindowOptions{Title: "TEJUN", Width: 1200, Height: 800, URL: "/"})
 
 	return app.Run()
+}
+
+func runExecutionWorker(ctx context.Context, wg *sync.WaitGroup, runner *appusecase.ExecutionRunner) {
+	defer wg.Done()
+
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		_, _ = runner.RunOne(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func runProjectWorker(
