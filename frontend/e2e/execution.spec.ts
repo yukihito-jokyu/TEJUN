@@ -60,6 +60,7 @@ const snapshot = () => ({
       title: "画面を確認",
       instruction: "画面を開く",
       expectedResult: "表示される",
+      suggestedCommand: "task dev",
       ai: side(),
       human: side(),
       humanEvidenceRequirement: "text_or_image",
@@ -250,6 +251,7 @@ async function mockExecution(page: Page, state: State, initialRoute = "#/project
         evidenceId: `evidence-${state.checks[0].evidence.human.length}`,
         actor: "human",
         kind: input.kind,
+        text: input.kind === "text" ? input.text : "",
         displayName: input.kind === "text" ? input.text : input.displayName,
         mimeType: input.kind === "text" ? "text/plain" : "image/png",
         size: 10,
@@ -303,9 +305,11 @@ test("準備から開始し、AI結果と人間証跡を確認して生成する
   await expect(page.getByRole("region", { name: "AIとの会話" })).toBeVisible();
   await expect(page.getByRole("region", { name: "チェック項目" })).toContainText("1 画面を確認");
   await expect(page.getByRole("button", { name: "手順書の下書きを生成" })).toBeDisabled();
-  await page.getByLabel("AIにメッセージを送る").fill("確認してください");
-  await page.getByRole("button", { name: "送信" }).click();
-  await expect(page.getByText("確認してください")).toBeVisible();
+  await expect(page.getByLabel("AIにメッセージを送る")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "AIチェックを実行" })).toHaveCount(1);
+  await expect(
+    page.locator(".execution-chat").getByRole("button", { name: "AIチェックを実行" }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "AIチェックを実行" }).click();
   await expect(page.getByRole("status")).toContainText("実行中");
   expect(state.checks[0].ai.checked).toBe(false);
@@ -313,10 +317,12 @@ test("準備から開始し、AI結果と人間証跡を確認して生成する
   state.checks[0].ai = side(true);
   state.changeSequence++;
   await expect(page.getByLabel("AI確認済み")).toBeChecked();
+  await expect(page.getByLabel("確認済み", { exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "証跡を追加" }).click();
   await page.getByLabel("テキスト証跡").fill("表示を確認した");
   await page.getByRole("button", { name: "テキストを添付" }).click();
   await expect(page.getByText("表示を確認した")).toBeVisible();
+  await expect(page.getByLabel("確認済み", { exact: true })).toBeEnabled();
   await page.getByLabel("確認済み", { exact: true }).click();
   await expect(page.getByLabel("確認済み", { exact: true })).toBeChecked();
   state.readiness = { canGenerateProcedure: true, blockingReasons: [] };
@@ -328,7 +334,6 @@ test("準備から開始し、AI結果と人間証跡を確認して生成する
   await expect(page.getByRole("heading", { name: "生成した手順書" })).toBeVisible();
   expect(calls.map((call) => call.id)).toEqual([
     method.start,
-    method.message,
     method.run,
     method.evidence,
     method.human,
@@ -372,7 +377,7 @@ test("画像失敗を再試行し、permissionの提示optionだけを返す", a
   expect(calls.filter((call) => call.id === method.evidence)).toHaveLength(2);
 });
 
-test("Event欠落後の再表示でsnapshotを取得し、keyboardで操作する", async ({ page }) => {
+test("Event欠落後の再表示でsnapshotを取得する", async ({ page }) => {
   const state = snapshot();
   const calls = await mockExecution(page, state);
   await page.goto("/#/projects/p/check");
@@ -389,12 +394,137 @@ test("Event欠落後の再表示でsnapshotを取得し、keyboardで操作す�
   state.changeSequence++;
   await page.reload();
   await expect(page.getByText("外部で更新")).toBeVisible();
-  await page.getByLabel("AIにメッセージを送る").focus();
-  await page.keyboard.type("キーボード操作");
-  await page.keyboard.press("Tab");
-  await page.keyboard.press("Enter");
-  await expect(page.getByText("キーボード操作")).toBeVisible();
-  expect(calls.find((call) => call.id === method.message)?.input.content).toMatchObject([
-    { type: "text", text: "キーボード操作" },
-  ]);
+  await expect(page.getByLabel("AIにメッセージを送る")).toHaveCount(0);
+  expect(calls.find((call) => call.id === method.message)).toBeUndefined();
+});
+
+test("AIチェックの実行中に各項目のログと証跡を順に表示する", async ({ page }) => {
+  const state = snapshot();
+  state.checks.push({ ...state.checks[0], checkId: "second", sequence: 2, title: "二番目" });
+  await mockExecution(page, state);
+  await page.goto("/#/projects/p/check");
+  await page.getByRole("button", { name: "AIチェックを実行" }).click();
+
+  state.checks[0].ai = side(true);
+  state.checks[0].evidence.ai.push({
+    evidenceId: "first-evidence",
+    kind: "text",
+    text: "最初の実行結果\n終了コード0を確認",
+    displayName: "",
+  });
+  state.conversation.items.push({
+    messageId: "first-log",
+    role: "agent",
+    content: [{ type: "text", text: "1. 画面を確認: 完了" }],
+  });
+  state.changeSequence++;
+
+  await expect(page.getByText("1. 画面を確認: 完了")).toBeVisible();
+  await expect(page.getByRole("region", { name: "画面を確認のAIチェック" })).toContainText(
+    "最初の実行結果",
+  );
+  await expect(page.getByRole("region", { name: "画面を確認のAIチェック" })).toContainText(
+    "終了コード0を確認",
+  );
+  await expect(page.getByRole("region", { name: "二番目のAIチェック" })).toContainText("待機中");
+  await expect(page.getByRole("button", { name: "AIチェックを実行" })).toBeDisabled();
+});
+
+test("画像の貼り付けとドロップで証跡を追加する", async ({ page }) => {
+  const state = snapshot();
+  state.checks[0].ai = side(true);
+  const calls = await mockExecution(page, state);
+  await page.goto("/#/projects/p/check");
+  await expect(page.getByRole("checkbox", { name: "確認済み", exact: true })).toBeDisabled();
+  await page.getByRole("button", { name: "証跡を追加" }).click();
+
+  for (const type of ["paste", "drop"] as const) {
+    await page.locator(".execution-evidence-editor").evaluate((element, eventType) => {
+      const bytes = Uint8Array.from(
+        atob(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==",
+        ),
+        (char) => char.charCodeAt(0),
+      );
+      const file = new File([bytes], `${eventType}.png`, { type: "image/png" });
+      const data = new DataTransfer();
+      data.items.add(file);
+      element.dispatchEvent(
+        eventType === "paste"
+          ? new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: data })
+          : new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: data }),
+      );
+    }, type);
+    await expect
+      .poll(() => calls.filter((call) => call.id === method.evidence).length)
+      .toBe(type === "paste" ? 1 : 2);
+  }
+  expect(
+    calls.filter((call) => call.id === method.evidence).every((call) => call.input.imageData),
+  ).toBe(true);
+  await expect(page.getByRole("checkbox", { name: "確認済み", exact: true })).toBeEnabled();
+});
+
+test("AI確認が任意の項目だけでもAIチェックを開始できる", async ({ page }) => {
+  const state = snapshot();
+  state.checks[0].ai = { ...side(), required: false, status: "not_required" };
+  const calls = await mockExecution(page, state);
+  await page.goto("/#/projects/p/check");
+  const button = page.getByRole("button", { name: "AIチェックを実行" });
+  await expect(button).toBeEnabled();
+  await button.click();
+  expect(calls.filter((call) => call.id === method.run)).toHaveLength(1);
+});
+
+test("準備で決めたコマンドを表示し、アイコンボタンでコピーできる", async ({ page }) => {
+  const state = snapshot();
+  await mockExecution(page, state);
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto("/#/projects/p/check");
+  await expect(page.getByText("task dev", { exact: true })).toBeVisible();
+  const copy = page.getByRole("button", { name: "1番のコマンドをコピー" });
+  await expect(copy.locator("svg.lucide-copy")).toBeVisible();
+  await copy.click();
+  await expect(copy.locator("svg.lucide-copy")).toHaveCount(0);
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("task dev");
+});
+
+test("画面全体は固定し、会話とチェック項目を別々にスクロールする", async ({ page }) => {
+  const state = snapshot();
+  state.checks = Array.from({ length: 18 }, (_, index) => ({
+    ...state.checks[0],
+    checkId: `check-${index}`,
+    sequence: index + 1,
+    title: `確認 ${index + 1}`,
+  }));
+  state.conversation.items = Array.from({ length: 30 }, (_, index) => ({
+    messageId: `message-${index}`,
+    turnId: `turn-${index}`,
+    role: "agent",
+    status: "completed",
+    content: [{ type: "text", text: `会話 ${index + 1}` }],
+  }));
+  await mockExecution(page, state);
+  await page.goto("/#/projects/p/check");
+  await expect(page.getByRole("region", { name: "チェック項目" })).toContainText("確認 18");
+
+  for (const width of [1200, 700]) {
+    await page.setViewportSize({ width, height: 720 });
+    const size = await page.evaluate(() => {
+      const chat = document.querySelector(".execution-thread")!;
+      const checks = document.querySelector(".execution-workspace")!;
+      return {
+        pageScroll: document.documentElement.scrollHeight > window.innerHeight,
+        chatOverflow: chat.scrollHeight > chat.clientHeight,
+        checkOverflow: checks.scrollHeight > checks.clientHeight,
+        headerTop: document.querySelector(".execution-header")!.getBoundingClientRect().top,
+      };
+    });
+    expect(size).toEqual({
+      pageScroll: false,
+      chatOverflow: true,
+      checkOverflow: true,
+      headerTop: 0,
+    });
+  }
 });
