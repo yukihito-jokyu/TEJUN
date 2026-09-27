@@ -5,11 +5,40 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/yukihito-jokyu/TEJUN/internal/application"
+	"github.com/yukihito-jokyu/TEJUN/internal/domain/shared"
 )
+
+func TestDestinationError(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		err  error
+		code string
+	}{
+		{name: "permission denied", err: &os.PathError{Op: "open", Path: "/private/secret", Err: syscall.EACCES}, code: "destination_permission_denied"},
+		{name: "operation not permitted", err: &os.PathError{Op: "open", Path: "/private/secret", Err: syscall.EPERM}, code: "destination_permission_denied"},
+		{name: "missing directory", err: os.ErrNotExist, code: "validation_error"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := destinationError(test.err)
+
+			var userError *shared.Error
+			if !errors.As(err, &userError) || userError.Code != test.code {
+				t.Fatalf("destinationError() = %v, want code %q", err, test.code)
+			}
+
+			if userError.Message == "" || userError.FieldErrors["destination"] == "" ||
+				strings.Contains(err.Error(), "/private/secret") {
+				t.Fatalf("error leaks path or lacks message: %v", err)
+			}
+		})
+	}
+}
 
 func TestExportPreservesExistingOutput(t *testing.T) {
 	document := []byte(`{"title":"新しい手順","steps":[]}`)

@@ -60,12 +60,12 @@ func (e *Exporter) Verify(
 
 	parent, err := filepath.EvalSymlinks(filepath.Dir(path))
 	if err != nil {
-		return application.VerifiedPathSelection{}, nil, invalidDestination()
+		return application.VerifiedPathSelection{}, nil, destinationError(err)
 	}
 
 	root, err := os.OpenRoot(parent)
 	if err != nil {
-		return application.VerifiedPathSelection{}, nil, invalidDestination()
+		return application.VerifiedPathSelection{}, nil, destinationError(err)
 	}
 
 	identity, err := rootIdentity(root, name)
@@ -199,6 +199,10 @@ func (e *Exporter) Export(ctx context.Context, job application.ClaimedProjectJob
 
 	file, err := selected.root.OpenFile(staging, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
+		if os.IsPermission(err) {
+			return destinationError(err)
+		}
+
 		return err
 	}
 	defer func() { _ = selected.root.Remove(staging) }()
@@ -301,7 +305,11 @@ func rootIdentity(root *os.Root, name string) (*application.OverwriteIdentity, e
 		return nil, nil
 	}
 
-	if err != nil || !info.Mode().IsRegular() {
+	if err != nil {
+		return nil, destinationError(err)
+	}
+
+	if !info.Mode().IsRegular() {
 		return nil, invalidDestination()
 	}
 
@@ -311,18 +319,22 @@ func rootIdentity(root *os.Root, name string) (*application.OverwriteIdentity, e
 func identityForInfo(root *os.Root, name string, info os.FileInfo) (*application.OverwriteIdentity, error) {
 	file, err := openIdentityNoFollow(root, name)
 	if err != nil {
-		return nil, invalidDestination()
+		return nil, destinationError(err)
 	}
 	defer func() { _ = file.Close() }()
 
 	opened, err := file.Stat()
-	if err != nil || !os.SameFile(info, opened) {
+	if err != nil {
+		return nil, destinationError(err)
+	}
+
+	if !os.SameFile(info, opened) {
 		return nil, invalidDestination()
 	}
 
 	hash := sha256.New()
 	if _, err := io.Copy(hash, file); err != nil {
-		return nil, err
+		return nil, destinationError(err)
 	}
 
 	device, inode := fileID(info)
@@ -357,6 +369,18 @@ func invalidDestination() error {
 		Message:     "出力先を検証できません",
 		FieldErrors: map[string]string{"destination": "出力先を検証できません"},
 	}
+}
+
+func destinationError(err error) error {
+	if os.IsPermission(err) {
+		return &shared.Error{
+			Code:        "destination_permission_denied",
+			Message:     "保存先へのアクセス権がありません",
+			FieldErrors: map[string]string{"destination": "保存先へのアクセス権がありません"},
+		}
+	}
+
+	return invalidDestination()
 }
 
 var _ application.ProcedureExporter = (*Exporter)(nil)
