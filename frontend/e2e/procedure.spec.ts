@@ -53,7 +53,10 @@ function snapshot() {
             description: "結果を確認",
             command: "npm test",
             notes: [],
-            evidenceRefs: [{ evidenceId: "ai-1", displayName: "実行結果", included: true }],
+            evidenceRefs: [
+              { evidenceId: "ai-1", displayName: "実行結果", included: true },
+              { evidenceId: "human-1", displayName: "人間の確認画像", included: true },
+            ],
           },
         ],
       },
@@ -208,26 +211,29 @@ test("手順書を編集し、分離した証跡を確認して完成・出力�
   const mock = await mockProcedure(page, state);
   await page.goto("/#/projects/p/procedure");
   await expect(page.getByRole("heading", { name: "確認手順書" })).toBeVisible();
-  await expect(page.getByText("元の動作チェック: 1 項目 · 証跡 2 件")).toBeVisible();
-  const ai = page.getByRole("region", { name: "AIの証跡" });
-  const human = page.getByRole("region", { name: "人間の証跡" });
-  await expect(ai.getByRole("button", { name: "AI の実行結果" })).toBeVisible();
-  await expect(human.getByRole("button", { name: "人間の確認画像" })).toBeVisible();
+  await expect(page.getByText("動作チェックとの整合性を確認済み")).toBeVisible();
+  const ai = page.getByRole("button", { name: "実行結果の証跡を見る" });
+  const human = page.getByRole("button", { name: "人間の確認画像の証跡を見る" });
+  await expect(ai).toBeVisible();
+  await expect(human).toBeVisible();
 
-  await ai.getByRole("button", { name: "AI の実行結果" }).click();
+  await ai.click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toContainText("テスト開始");
+  await expect(dialog.getByRole("region", { name: "AIの証跡" })).toContainText("実行結果");
+  await expect(dialog.getByRole("region", { name: "人間の証跡" })).toContainText("人間の確認画像");
   await dialog.getByRole("button", { name: "続きを読む" }).click();
   await expect(dialog).toContainText("全件成功");
   await dialog.getByRole("button", { name: "閉じる" }).click();
-  await expect(ai.getByRole("button", { name: "AI の実行結果" })).toBeFocused();
-  await human.getByRole("button", { name: "人間の確認画像" }).click();
+  await expect(ai).toBeFocused();
+  await human.click();
   await expect(dialog.getByRole("img", { name: "確認画像" })).toBeVisible();
   await dialog.getByRole("button", { name: "閉じる" }).click();
   expect(
     mock.calls.filter((call) => call.id === method.evidence).map((call) => call.input.evidenceId),
-  ).toEqual(["ai-1", "ai-1", "human-1"]);
+  ).toEqual(["ai-1", "human-1", "ai-1", "human-1", "ai-1"]);
 
+  await page.getByRole("button", { name: "直接編集" }).click();
   await page.getByLabel("手順書タイトル").fill("更新した手順書");
   await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByRole("heading", { name: "更新した手順書" })).toBeVisible();
@@ -236,9 +242,9 @@ test("手順書を編集し、分離した証跡を確認して完成・出力�
     document: { title: "更新した手順書" },
   });
   await page.getByRole("button", { name: "手順書を完成" }).click();
-  await expect(page.getByText("版 1 · 完成")).toBeVisible();
+  await expect(page.getByText("手順書が完成しました")).toBeVisible();
   await expect(page.getByRole("status").filter({ hasText: "手順書を完成しました" })).toBeVisible();
-  await expect(page.getByLabel("手順書タイトル")).toBeDisabled();
+  await expect(page.getByRole("button", { name: "直接編集" })).toHaveCount(0);
   expect(mock.calls.find((call) => call.id === method.complete)?.input.expectedRevision).toBe(2);
 
   mock.path(null);
@@ -284,11 +290,11 @@ test("手順書を編集し、分離した証跡を確認して完成・出力�
   });
 });
 
-test("修正依頼の取消と確認への回答後にdraftを再取得し、競合入力を保持する", async ({ page }) => {
+test("修正依頼と確認に応答し、競合入力の保持と編集破棄を確認する", async ({ page }) => {
   const state = snapshot();
   const mock = await mockProcedure(page, state);
   await page.goto("/#/projects/p/procedure");
-  await page.getByLabel("修正内容").fill("説明を明確にする");
+  await page.getByLabel("手順書の修正をAIへ依頼").fill("説明を明確にする");
   await page.getByRole("button", { name: "修正を依頼" }).click();
   await expect(page.getByRole("button", { name: "AIの修正を取り消す" })).toBeVisible();
   await page.getByRole("button", { name: "AIの修正を取り消す" }).click();
@@ -313,6 +319,7 @@ test("修正依頼の取消と確認への回答後にdraftを再取得し、競
     content: '{"ok":true}',
   });
 
+  await page.getByRole("button", { name: "直接編集" }).click();
   await page.getByLabel("概要").fill("保存したい内容");
   mock.conflict();
   await page.getByRole("button", { name: "保存", exact: true }).click();
@@ -320,7 +327,9 @@ test("修正依頼の取消と確認への回答後にdraftを再取得し、競
   await expect(
     page.getByRole("status").filter({ hasText: "入力は保持されています" }),
   ).toBeVisible();
+  await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "再取得" }).click();
-  await expect(page.getByLabel("概要")).toHaveValue("保存したい内容");
+  await page.getByRole("button", { name: "直接編集" }).click();
+  await expect(page.getByLabel("概要")).toHaveValue("動作確認の結果");
   expect(state.procedure.status).toBe("draft");
 });
