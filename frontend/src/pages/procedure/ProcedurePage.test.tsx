@@ -1,9 +1,16 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ProcedureView } from "@/shared/api/wails/procedure";
 import { ProcedurePage } from "./ProcedurePage";
 
 afterEach(cleanup);
+HTMLDialogElement.prototype.showModal = function () {
+  this.open = true;
+};
+HTMLDialogElement.prototype.close = function () {
+  this.open = false;
+  fireEvent(this, new Event("close"));
+};
 
 const view: ProcedureView = {
   project: { projectId: "project-1", name: "Sample" },
@@ -17,7 +24,20 @@ const view: ProcedureView = {
       overview: "概要",
       prerequisites: [],
       steps: [
-        { clientKey: "step-1", title: "確認", description: "説明", notes: [], evidenceRefs: [] },
+        {
+          clientKey: "step-1",
+          title: "確認",
+          description: "説明",
+          notes: [],
+          evidenceRefs: [{ evidenceId: "ai-1", displayName: "AI実行", included: true }],
+        },
+        {
+          clientKey: "step-2",
+          title: "人間確認",
+          description: "確認",
+          notes: [],
+          evidenceRefs: [{ evidenceId: "human-1", displayName: "人間確認", included: true }],
+        },
       ],
     },
   },
@@ -69,6 +89,77 @@ function props() {
 }
 
 describe("ProcedurePage", () => {
+  it("工程ヘッダーを表示し、Escで未保存の直接編集を破棄する", () => {
+    const input = props();
+    render(<ProcedurePage {...input} />);
+    expect(
+      screen.getByRole("navigation", { name: "作成工程" }).querySelector('[aria-current="step"]')
+        ?.textContent,
+    ).toContain("手順書");
+    fireEvent.click(screen.getByRole("button", { name: "直接編集" }));
+    fireEvent.change(screen.getByLabelText("手順書タイトル"), {
+      target: { value: "未保存の題名" },
+    });
+    expect(screen.getByRole("heading", { name: "元の題名" })).toBeTruthy();
+    fireEvent(screen.getByRole("dialog", { name: "文書全体を編集" }), new Event("close"));
+    fireEvent.click(screen.getByRole("button", { name: "直接編集" }));
+    expect(screen.getByLabelText("手順書タイトル")).toHaveProperty("value", "元の題名");
+    expect(screen.getByRole("button", { name: "手順書を完成" })).not.toHaveProperty(
+      "disabled",
+      true,
+    );
+  });
+
+  it("関連証跡の取得失敗を欠落と誤表示せず再取得できる", async () => {
+    const input = props();
+    input.onLoadEvidence = vi
+      .fn()
+      .mockResolvedValueOnce({
+        summary: view.evidence.ai[0],
+        source: { actor: "ai" },
+        integrity: "verified",
+      })
+      .mockRejectedValueOnce(new Error("取得失敗"))
+      .mockResolvedValueOnce({
+        summary: view.evidence.ai[0],
+        source: { actor: "ai" },
+        integrity: "verified",
+      })
+      .mockResolvedValueOnce({
+        summary: view.evidence.human[0],
+        source: { actor: "human" },
+        integrity: "verified",
+      });
+    render(
+      <ProcedurePage
+        {...input}
+        view={{
+          ...view,
+          procedure: {
+            ...view.procedure,
+            document: {
+              ...view.procedure.document,
+              steps: [
+                {
+                  ...view.procedure.document.steps[0],
+                  evidenceRefs: [
+                    view.procedure.document.steps[0].evidenceRefs[0],
+                    view.procedure.document.steps[1].evidenceRefs[0],
+                  ],
+                },
+              ],
+            },
+          },
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "AI実行の証跡を見る" }));
+    expect(await screen.findByRole("button", { name: "証跡を再取得" })).toBeTruthy();
+    expect(screen.queryByText("この項目に人間の証跡はありません。")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "証跡を再取得" }));
+    expect(await screen.findByText("人間確認")).toBeTruthy();
+  });
+
   it("別の手順書へ切り替えると編集と古い保存応答を破棄する", async () => {
     let finishSave!: () => void;
     const input = props();
@@ -76,6 +167,7 @@ describe("ProcedurePage", () => {
       .fn()
       .mockImplementation(() => new Promise<void>((resolve) => (finishSave = resolve)));
     const { rerender } = render(<ProcedurePage {...input} />);
+    fireEvent.click(screen.getByRole("button", { name: "直接編集" }));
     fireEvent.change(screen.getByLabelText("手順書タイトル"), { target: { value: "旧編集" } });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     const next = {
@@ -88,7 +180,7 @@ describe("ProcedurePage", () => {
       },
     };
     rerender(<ProcedurePage {...input} view={next} />);
-    expect(screen.getByLabelText("手順書タイトル")).toHaveProperty("value", "新手順書");
+    expect(screen.getByRole("heading", { name: "新手順書" })).toBeTruthy();
     await act(async () => finishSave());
     expect(input.onReload).not.toHaveBeenCalled();
     expect(screen.getByRole("heading", { name: "新手順書" })).toBeTruthy();
@@ -110,14 +202,14 @@ describe("ProcedurePage", () => {
       })
       .mockImplementationOnce(() => new Promise((_, reject) => (failPage = reject)));
     render(<ProcedurePage {...input} />);
-    fireEvent.click(screen.getByRole("button", { name: "AI実行" }));
+    fireEvent.click(screen.getByRole("button", { name: "AI実行の証跡を見る" }));
     await screen.findByText("最初");
     const more = screen.getByRole("button", { name: "続きを読む" });
     fireEvent.click(more);
     fireEvent.click(more);
     expect(input.onLoadEvidence).toHaveBeenCalledTimes(2);
     failPage(new Error("取得失敗"));
-    expect(await screen.findByRole("alert")).toHaveProperty("textContent", "取得失敗");
+    expect(await screen.findByText("取得失敗")).toBeTruthy();
     expect(screen.getByText("最初")).toBeTruthy();
   });
 
@@ -141,9 +233,9 @@ describe("ProcedurePage", () => {
         textPage: { content: "新しい証跡", truncated: false },
       });
     render(<ProcedurePage {...input} />);
-    fireEvent.click(screen.getByRole("button", { name: "AI実行" }));
+    fireEvent.click(screen.getByRole("button", { name: "AI実行の証跡を見る" }));
     fireEvent.click(screen.getByRole("button", { name: "閉じる" }));
-    fireEvent.click(screen.getByRole("button", { name: "人間確認" }));
+    fireEvent.click(screen.getByRole("button", { name: "人間確認の証跡を見る" }));
     expect(await screen.findByText("新しい証跡")).toBeTruthy();
     await act(async () =>
       finishOld({
@@ -159,10 +251,8 @@ describe("ProcedurePage", () => {
   it("未保存の入力を保持し、revision付きで保存する", async () => {
     const input = props();
     render(<ProcedurePage {...input} />);
-    fireEvent.change(
-      within(screen.getByRole("region", { name: "手順書本文" })).getByLabelText("手順書タイトル"),
-      { target: { value: "編集後" } },
-    );
+    fireEvent.click(screen.getByRole("button", { name: "直接編集" }));
+    fireEvent.change(screen.getByLabelText("手順書タイトル"), { target: { value: "編集後" } });
     expect(
       screen.getAllByRole("status").some((status) => status.textContent?.includes("未保存")),
     ).toBe(true);
@@ -180,6 +270,7 @@ describe("ProcedurePage", () => {
     const input = props();
     input.onSave = vi.fn().mockRejectedValue(new Error("revision conflict"));
     const { rerender } = render(<ProcedurePage {...input} />);
+    fireEvent.click(screen.getByRole("button", { name: "直接編集" }));
     fireEvent.change(screen.getByLabelText("手順書タイトル"), { target: { value: "自分の編集" } });
     rerender(
       <ProcedurePage
@@ -218,9 +309,7 @@ describe("ProcedurePage", () => {
         view={{ ...view, procedure: { ...view.procedure, status: "completed" } }}
       />,
     );
-    expect(
-      within(screen.getByRole("region", { name: "手順書本文" })).getByLabelText("手順書タイトル"),
-    ).toHaveProperty("disabled", true);
+    expect(screen.queryByRole("button", { name: "直接編集" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "PDFを出力" }));
     await waitFor(() => expect(input.onExport).toHaveBeenCalledWith("pdf", 3, expect.any(String)));
   });
@@ -259,10 +348,10 @@ describe("ProcedurePage", () => {
     };
     const input = props();
     render(<ProcedurePage {...input} />);
-    expect(screen.getByRole("region", { name: "AIの証跡" }).textContent).toContain("AI実行");
-    expect(screen.getByRole("region", { name: "人間の証跡" }).textContent).toContain("人間確認");
+    expect(screen.getByRole("button", { name: "AI実行の証跡を見る" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "人間確認の証跡を見る" })).toBeTruthy();
     expect(input.onLoadEvidence).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "AI実行" }));
+    fireEvent.click(screen.getByRole("button", { name: "AI実行の証跡を見る" }));
     await waitFor(() => expect(input.onLoadEvidence).toHaveBeenCalledWith("ai-1"));
     expect(await screen.findByText("/tmp")).toBeTruthy();
   });
@@ -288,6 +377,7 @@ describe("ProcedurePage", () => {
       },
     };
     render(<ProcedurePage {...input} view={editedView} />);
+    fireEvent.click(screen.getByRole("button", { name: "直接編集" }));
     expect(screen.getByRole("textbox", { name: "証跡 ai-1 の表示名" })).toBeTruthy();
     expect(screen.getByRole("textbox", { name: "証跡 human-1 の表示名" })).toBeTruthy();
     expect(screen.getByRole("checkbox", { name: "証跡 ai-1 を参照する" })).toBeTruthy();

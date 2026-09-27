@@ -45,6 +45,13 @@ const view: ProcedureView = {
 };
 
 beforeEach(() => {
+  HTMLDialogElement.prototype.showModal = function () {
+    this.open = true;
+  };
+  HTMLDialogElement.prototype.close = function () {
+    this.open = false;
+    fireEvent(this, new Event("close"));
+  };
   vi.resetAllMocks();
   vi.mocked(getProcedure).mockResolvedValue(view);
   vi.mocked(onAppEvent).mockReturnValue(vi.fn());
@@ -76,6 +83,7 @@ it("Eventで実画面を再取得し、編集保存のrevisionと結果を反映
     emit({ aggregateId: "p-1", correlation: {}, changeSequence: 2 } as Parameters<typeof emit>[0]),
   );
   expect(await screen.findByRole("heading", { name: "外部更新" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "直接編集" }));
   fireEvent.change(screen.getByLabelText("手順書タイトル"), { target: { value: "保存済み" } });
   current = {
     ...current,
