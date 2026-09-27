@@ -7,10 +7,6 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import * as trace$0 from "../../trace/models.js";
-
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
 export function ArchiveProject(input: $models.ArchiveProjectInput): $CancellablePromise<$models.MutationResult<$models.ArchivedProject>> {
@@ -47,8 +43,4 @@ export function PrepareExportProcedure(input: $models.PrepareExportProcedureInpu
 
 export function ReconnectProjectSession(input: $models.ReconnectSessionInput): $CancellablePromise<$models.MutationResult<$models.SessionConnectionAccepted>> {
     return $Call.ByID(1544727671, input);
-}
-
-export function SetTrace(writer: trace$0.Writer | null): $CancellablePromise<void> {
-    return $Call.ByID(3148781442, writer);
 }

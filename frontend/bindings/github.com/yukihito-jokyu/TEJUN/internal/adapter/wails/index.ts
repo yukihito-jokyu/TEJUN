@@ -4,12 +4,14 @@
 import * as AgentControlService from "./agentcontrolservice.js";
 import * as ExecutionService from "./executionservice.js";
 import * as PreparationService from "./preparationservice.js";
+import * as ProcedureService from "./procedureservice.js";
 import * as ProjectService from "./projectservice.js";
 import * as StartupService from "./startupservice.js";
 export {
     AgentControlService,
     ExecutionService,
     PreparationService,
+    ProcedureService,
     ProjectService,
     StartupService
 };
@@ -35,6 +37,7 @@ export type {
     CheckAuthenticationInput,
     CheckItemInput,
     CheckUpdate,
+    CompleteProcedureInput,
     CompleteSetupInput,
     CreateProjectInput,
     CreateRevisionInput,
@@ -51,6 +54,7 @@ export type {
     ExportAccepted,
     ExportProcedureInput,
     GenerateProcedureDraftInput,
+    GetEvidenceInput,
     InitialSetupResult,
     LogoutAccepted,
     LogoutAgentInput,
@@ -63,7 +67,11 @@ export type {
     PreparationViewQuery,
     PrepareExportProcedureInput,
     PreparedExportProcedure,
+    ProcedureEvidenceDetail,
+    ProcedureEvidenceImage,
     ProcedureGenerationAccepted,
+    ProcedureTextSegment,
+    ProcedureViewQuery,
     ProjectListQuery,
     ProjectListResult,
     ProjectProgress,
@@ -73,6 +81,7 @@ export type {
     RunPendingChecksInput,
     SaveCheckPlanInput,
     SavePreparationBriefInput,
+    SaveProcedureDraftInput,
     SaveSessionPermissionPolicyInput,
     SendExecutionMessageInput,
     SendPreparationMessageInput,

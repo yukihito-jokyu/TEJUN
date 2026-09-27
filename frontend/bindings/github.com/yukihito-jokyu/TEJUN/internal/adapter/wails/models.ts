@@ -167,6 +167,8 @@ export interface CheckUpdate {
     "readiness": ExecutionReadiness;
 }
 
+export type CompleteProcedureInput = application$0.ProcedureCompleteInput;
+
 export interface CompleteSetupInput {
     "connection": AgentConnectionInput;
     "probeId": string;
@@ -283,6 +285,13 @@ export interface GenerateProcedureDraftInput {
     "operationId": string;
 }
 
+export interface GetEvidenceInput {
+    "procedureId": string;
+    "evidenceId": string;
+    "textCursor"?: string;
+    "textLimit"?: number;
+}
+
 export interface InitialSetupResult {
     "connection": AgentConnectionSummary;
     "nextRoute": string;
@@ -359,11 +368,32 @@ export interface PreparedExportProcedure {
     "overwriteRequired": boolean;
 }
 
+export interface ProcedureEvidenceDetail {
+    "summary": application$0.ProcedureEvidenceSummary;
+    "source": any;
+    "textPage"?: ProcedureTextSegment | null;
+    "image"?: ProcedureEvidenceImage | null;
+    "integrity": string;
+}
+
+export interface ProcedureEvidenceImage {
+    "previewUrl": string;
+    "alt": string;
+}
+
 export interface ProcedureGenerationAccepted {
     "procedureId": string;
     "nextRoute": string;
     "acceptedAt": string;
 }
+
+export interface ProcedureTextSegment {
+    "content": string;
+    "nextCursor"?: string | null;
+    "truncated": boolean;
+}
+
+export type ProcedureViewQuery = application$0.ProcedureViewQuery;
 
 export interface ProjectListQuery {
     "search": string;
@@ -441,6 +471,8 @@ export interface SavePreparationBriefInput {
     "operationId": string;
     "brief": PreparationBriefInput;
 }
+
+export type SaveProcedureDraftInput = application$0.ProcedureSaveInput;
 
 export interface SaveSessionPermissionPolicyInput {
     "sessionId": string;
