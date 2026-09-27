@@ -63,6 +63,10 @@ func TestProcedureDraftLifecycle(t *testing.T) {
 	}
 
 	doc := view.Procedure.Document
+	if len(doc.Steps) != 1 || doc.Steps[0].Command != "go version" {
+		t.Fatalf("generated command = %+v", doc.Steps)
+	}
+
 	doc.Overview = "updated"
 
 	tests := []struct {

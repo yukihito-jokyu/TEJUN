@@ -281,7 +281,7 @@ WHERE e.execution_id = ? AND c.check_id = ?`, input.ExecutionID, input.CheckID).
 		}
 	}
 
-	if status != "active" || (requirement != "none" && requirement != input.Kind) {
+	if status != "active" || (requirement != "none" && !execution.EvidenceMatches(requirement, input.Kind)) {
 		return &shared.Error{Code: "invalid_state", Message: "このcheckに証跡を追加できません"}
 	}
 

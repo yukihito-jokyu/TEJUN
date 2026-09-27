@@ -87,6 +87,102 @@ func TestOpenUpgradesPreparationTurnColumns(t *testing.T) {
 	t.Fatal("plan_revision column missing after upgrade")
 }
 
+func TestCommandEvidenceMigrationUpgradesExistingChecks(t *testing.T) {
+	for _, tc := range []struct {
+		name, command, want string
+	}{
+		{name: "command", command: "go version", want: "text_or_image"},
+		{name: "no command", command: " ", want: "none"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo, _ := executionFixture(t)
+
+			migrationFS, err := fs.Sub(migrations, "migration")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			provider, err := goose.NewProvider(goose.DialectSQLite3, repo.db, migrationFS,
+				goose.WithLogger(goose.NopLogger()))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			for range 2 {
+				if _, err := provider.Down(ctx); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			for _, table := range []string{"check_items", "execution_checks"} {
+				if _, err := repo.db.ExecContext(
+					ctx,
+					`UPDATE `+table+` SET suggested_command=?,human_evidence_requirement='none'`,
+					tc.command,
+				); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			if _, err := provider.Up(ctx); err != nil {
+				t.Fatal(err)
+			}
+
+			for _, table := range []string{"check_items", "execution_checks"} {
+				var requirement string
+				if err := repo.db.QueryRowContext(ctx, `SELECT human_evidence_requirement FROM `+table).
+					Scan(&requirement); err != nil ||
+					requirement != tc.want {
+					t.Fatalf("%s requirement=%q err=%v", table, requirement, err)
+				}
+			}
+		})
+	}
+}
+
+func TestProcedureCommandMigrationRestoresGeneratedDraft(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := executionFixture(t)
+
+	migrationFS, err := fs.Sub(migrations, "migration")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	provider, err := goose.NewProvider(goose.DialectSQLite3, repo.db, migrationFS,
+		goose.WithLogger(goose.NopLogger()))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := provider.Down(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := repo.db.ExecContext(ctx, `INSERT INTO procedures
+(procedure_id,project_id,revision,status,document_json,created_at,updated_at)
+VALUES ('draft','p',1,'draft',?,1,1)`, `{"title":"Draft","steps":[{"stepId":"c","clientKey":"c","title":"Check","description":"Do it","notes":[],"evidenceRefs":[]}]}`); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := repo.db.ExecContext(ctx, `INSERT INTO procedure_sources(procedure_id,execution_id)
+VALUES ('draft','e')`); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := provider.Up(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	var command string
+	if err := repo.db.QueryRowContext(ctx,
+		`SELECT json_extract(document_json,'$.steps[0].command') FROM procedures WHERE procedure_id='draft'`).
+		Scan(&command); err != nil || command != "go version" {
+		t.Fatalf("restored command=%q err=%v", command, err)
+	}
+}
+
 func TestOpenAppliesMigrationsAndPragmas(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -127,8 +223,8 @@ func TestOpenAppliesMigrationsAndPragmas(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if version != 11 {
-				t.Fatalf("version=%d, want 11", version)
+			if version != 13 {
+				t.Fatalf("version=%d, want 13", version)
 			}
 
 			assertPragmasOnTwoConnections(t, db)
@@ -220,7 +316,7 @@ func TestOpenUpgradesExistingExecution(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for range 3 {
+	for range 5 {
 		if _, err := provider.Down(ctx); err != nil {
 			t.Fatal(err)
 		}
@@ -231,7 +327,7 @@ VALUES ('legacy', 'p', 's', 1, '')`); err != nil {
 		t.Fatal(err)
 	}
 
-	for range 3 {
+	for range 5 {
 		if _, err := provider.Up(ctx); err != nil {
 			t.Fatal(err)
 		}

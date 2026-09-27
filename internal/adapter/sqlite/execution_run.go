@@ -231,16 +231,22 @@ JOIN agent_connections c ON c.connection_id=p.connection_id WHERE e.execution_id
 
 	job.CheckIDs = []string{}
 	if job.RunID != "" {
-		rows, err := tx.QueryContext(ctx, `SELECT c.check_id, c.instruction, c.expected_result
+		rows, err := tx.QueryContext(
+			ctx,
+			`SELECT c.check_id, c.sequence, c.title, c.instruction, c.expected_result, c.suggested_command
 FROM execution_run_checks rc JOIN execution_checks c ON c.check_id = rc.check_id AND c.execution_id = ?
-WHERE rc.run_id = ? ORDER BY c.sequence`, job.ExecutionID, job.RunID)
+WHERE rc.run_id = ? ORDER BY c.sequence`,
+			job.ExecutionID,
+			job.RunID,
+		)
 		if err != nil {
 			return nil, err
 		}
 
 		for rows.Next() {
 			var target application.ExecutionCheckTarget
-			if err := rows.Scan(&target.CheckID, &target.Instruction, &target.ExpectedResult); err != nil {
+			if err := rows.Scan(&target.CheckID, &target.Sequence, &target.Title,
+				&target.Instruction, &target.ExpectedResult, &target.SuggestedCommand); err != nil {
 				_ = rows.Close()
 				return nil, err
 			}
@@ -263,16 +269,6 @@ WHERE rc.run_id = ? ORDER BY c.sequence`, job.ExecutionID, job.RunID)
 		); err != nil {
 			return nil, err
 		}
-
-		for _, id := range job.CheckIDs {
-			if _, err := tx.ExecContext(
-				ctx,
-				`UPDATE execution_checks SET ai_status = 'running' WHERE execution_id = ? AND check_id = ?`,
-				job.ExecutionID, id,
-			); err != nil {
-				return nil, err
-			}
-		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -280,6 +276,117 @@ WHERE rc.run_id = ? ORDER BY c.sequence`, job.ExecutionID, job.RunID)
 	}
 
 	return &job, nil
+}
+
+func (r *ExecutionRepository) StartExecutionCheck(ctx context.Context,
+	job application.ClaimedExecutionJob, check application.ExecutionCheckTarget, at time.Time,
+) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	result, err := tx.ExecContext(ctx, `UPDATE execution_checks SET ai_status='running'
+WHERE execution_id=? AND check_id=? AND ai_status='queued'
+AND EXISTS (SELECT 1 FROM execution_agent_jobs WHERE job_id=? AND state='running')`,
+		job.ExecutionID, check.CheckID, job.JobID)
+	if err != nil {
+		return err
+	}
+
+	if changed, err := result.RowsAffected(); err != nil || changed != 1 {
+		return &shared.Error{Code: "invalid_state", Message: "実行対象のチェックがありません"}
+	}
+
+	if _, err := tx.ExecContext(ctx, `INSERT INTO execution_turns
+(turn_id,execution_id,role,text,status,created_at) VALUES(?,?,'system',?,'completed',?)`,
+		job.JobID+":"+check.CheckID+":start", job.ExecutionID,
+		fmt.Sprintf("%d. %s のAIチェックを開始しました", check.Sequence, check.Title),
+		at.Format(time.RFC3339Nano)); err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(
+		ctx,
+		`UPDATE app_settings SET change_sequence=change_sequence+1 WHERE singleton=1`,
+	); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (r *ExecutionRepository) CompleteExecutionCheck(ctx context.Context,
+	job application.ClaimedExecutionJob, check application.ExecutionCheckTarget,
+	item application.ExecutionCheckResult, logs []string, at time.Time,
+) error {
+	if item.CheckID != check.CheckID || strings.TrimSpace(item.Evidence) == "" ||
+		(item.Status != "completed" && item.Status != "failed") {
+		return &shared.Error{Code: "validation_failed", Message: "AIチェックの結果が不正です"}
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	checkedAt := any(nil)
+	failureSummary := ""
+	statusLabel := "失敗"
+
+	if item.Status == "completed" {
+		checkedAt = at.Format(time.RFC3339Nano)
+		statusLabel = "完了"
+	} else {
+		failureSummary = item.Evidence
+	}
+
+	result, err := tx.ExecContext(ctx, `UPDATE execution_checks
+SET ai_status=?,ai_checked_at=?,ai_failure_summary=?
+WHERE execution_id=? AND check_id=? AND ai_status='running'`,
+		item.Status, checkedAt, failureSummary, job.ExecutionID, check.CheckID)
+	if err != nil {
+		return err
+	}
+
+	if changed, err := result.RowsAffected(); err != nil || changed != 1 {
+		return &shared.Error{Code: "invalid_state", Message: "実行中のチェックがありません"}
+	}
+
+	if _, err := tx.ExecContext(ctx, `INSERT INTO execution_evidence
+(evidence_id,execution_id,check_id,actor,kind,text,created_at)
+VALUES(?,?,?,'ai','text',?,?)`, job.JobID+":"+check.CheckID, job.ExecutionID,
+		check.CheckID, item.Evidence, at.Format(time.RFC3339Nano)); err != nil {
+		return err
+	}
+
+	for i, log := range logs {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO execution_turns
+(turn_id,execution_id,role,text,status,created_at) VALUES(?,?,'system',?,'completed',?)`,
+			fmt.Sprintf("%s:%s:tool:%d", job.JobID, check.CheckID, i), job.ExecutionID,
+			log, at.Format(time.RFC3339Nano)); err != nil {
+			return err
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, `INSERT INTO execution_turns
+(turn_id,execution_id,role,text,status,created_at) VALUES(?,?,'agent',?,'completed',?)`,
+		job.JobID+":"+check.CheckID+":result", job.ExecutionID,
+		fmt.Sprintf("%d. %s: %s。証跡: %s", check.Sequence, check.Title, statusLabel, item.Evidence),
+		at.Format(time.RFC3339Nano)); err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(
+		ctx,
+		`UPDATE app_settings SET change_sequence=change_sequence+1 WHERE singleton=1`,
+	); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func (r *ExecutionRepository) ReconnectExecutionSession(ctx context.Context,
@@ -460,11 +567,12 @@ WHERE job_id = ? AND state IN ('running', 'cancellation_requested')`, state, at.
 
 		if state == "cancelled" {
 			if _, err := tx.ExecContext(ctx, `UPDATE execution_checks SET ai_status = 'pending'
-WHERE execution_id = ? AND check_id IN (SELECT check_id FROM execution_run_checks WHERE run_id = ?)`,
+WHERE execution_id = ? AND ai_status IN ('queued','running')
+AND check_id IN (SELECT check_id FROM execution_run_checks WHERE run_id = ?)`,
 				job.ExecutionID, job.RunID); err != nil {
 				return err
 			}
-		} else if validResults {
+		} else if validResults && !output.Incremental {
 			for _, item := range output.Checks {
 				if item.Status != "completed" && item.Status != "failed" {
 					continue
@@ -509,23 +617,51 @@ VALUES (?, ?, ?, 'ai', 'text', ?, ?)`, job.JobID+":"+item.CheckID, job.Execution
 					return err
 				}
 			}
-		} else {
+		} else if !validResults {
 			failureSummary := "AIチェックに失敗しました"
 
 			var appErr *shared.Error
 			if errors.As(executeErr, &appErr) {
 				failureSummary = appErr.Message
+			} else if executeErr != nil {
+				failureSummary = executeErr.Error()
 			}
 
 			if _, err := tx.ExecContext(
 				ctx,
 				`UPDATE execution_checks SET ai_status = 'failed', ai_checked_at = NULL, ai_failure_summary = ?
-WHERE execution_id = ? AND check_id IN (SELECT check_id FROM execution_run_checks WHERE run_id = ?)`,
+WHERE execution_id = ? AND ai_status = 'running'
+AND check_id IN (SELECT check_id FROM execution_run_checks WHERE run_id = ?)`,
 				failureSummary,
 				job.ExecutionID,
 				job.RunID,
 			); err != nil {
 				return err
+			}
+
+			if _, err := tx.ExecContext(ctx, `UPDATE execution_checks SET ai_status='pending'
+WHERE execution_id=? AND ai_status='queued'
+AND check_id IN (SELECT check_id FROM execution_run_checks WHERE run_id=?)`,
+				job.ExecutionID, job.RunID); err != nil {
+				return err
+			}
+
+			if executeErr != nil {
+				for i, log := range output.Logs {
+					if _, err := tx.ExecContext(ctx, `INSERT INTO execution_turns
+(turn_id,execution_id,role,text,status,created_at) VALUES(?,?,'system',?,'completed',?)`,
+						fmt.Sprintf("%s:failed-log:%d", job.JobID, i), job.ExecutionID, log,
+						at.Format(time.RFC3339Nano)); err != nil {
+						return err
+					}
+				}
+
+				if _, err := tx.ExecContext(ctx, `INSERT INTO execution_turns
+(turn_id,execution_id,role,text,status,created_at) VALUES(?,?,'system',?,'failed',?)`,
+					job.JobID+":error", job.ExecutionID, failureSummary,
+					at.Format(time.RFC3339Nano)); err != nil {
+					return err
+				}
 			}
 		}
 

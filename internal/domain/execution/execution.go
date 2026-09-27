@@ -8,6 +8,7 @@ type Check struct {
 	AIRequired, HumanRequired   bool
 	Title, Instruction          string
 	ExpectedResult              string
+	SuggestedCommand            string
 	AIStatus, HumanStatus       string
 	AICheckedAt, HumanCheckedAt *time.Time
 	AIFailureSummary            string
@@ -20,6 +21,10 @@ type Evidence struct {
 	MimeType                                                      string
 	Size                                                          int64
 	CreatedAt                                                     time.Time
+}
+
+func EvidenceMatches(requirement, kind string) bool {
+	return requirement == kind || (requirement == "text_or_image" && (kind == "text" || kind == "image"))
 }
 
 type Permission struct {
@@ -72,7 +77,7 @@ func (s Snapshot) Readiness() (bool, []string) {
 			found := false
 
 			for _, evidence := range check.Evidence {
-				if evidence.Actor == "human" && evidence.Kind == check.HumanEvidenceRequirement &&
+				if evidence.Actor == "human" && EvidenceMatches(check.HumanEvidenceRequirement, evidence.Kind) &&
 					evidence.Status == "available" {
 					found = true
 				}

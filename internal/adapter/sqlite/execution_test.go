@@ -1,8 +1,10 @@
 package sqlite
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"image"
 	"image/png"
 	"os"
@@ -35,14 +37,14 @@ VALUES ('s', 'p', 'ready', '2026-09-26T00:00:00Z')`); err != nil {
 	at := time.Date(2026, 9, 26, 0, 0, 0, 0, time.UTC)
 
 	for _, statement := range []string{
-		`INSERT INTO check_items(check_id, project_id, sequence, title, instruction, expected_result, ai_required, human_required, human_evidence_requirement)
-VALUES ('c', 'p', 1, 'Check', 'Do it', 'Done', 1, 1, 'text')`,
+		`INSERT INTO check_items(check_id, project_id, sequence, title, instruction, expected_result, suggested_command, ai_required, human_required, human_evidence_requirement)
+VALUES ('c', 'p', 1, 'Check', 'Do it', 'Done', 'go version', 1, 1, 'text')`,
 		`INSERT INTO executions(execution_id, project_id, session_id, status, revision, started_at)
 VALUES ('e', 'p', 's', 'active', 1, '2026-09-26T00:00:00Z')`,
 		`INSERT INTO execution_checks(check_id, execution_id, sequence, title, instruction,
 expected_result, suggested_command, ai_required, human_required,
 ai_status, human_status, human_evidence_requirement)
-VALUES ('c', 'e', 1, 'Check', 'Do it', 'Done', '', 1, 1, 'completed', 'pending', 'text')`,
+VALUES ('c', 'e', 1, 'Check', 'Do it', 'Done', 'go version', 1, 1, 'completed', 'pending', 'text')`,
 	} {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
 			t.Fatal(err)
@@ -111,6 +113,73 @@ VALUES ('v', 'e', 'c', 'human', 'text', 'observed', '2026-09-26T00:00:00Z')`); e
 			after, err := repo.GetExecution(ctx, "p", 10)
 			if err != nil || after.Revision != 2 || !after.CanGenerate {
 				t.Fatalf("after=%+v err=%v", after, err)
+			}
+		})
+	}
+}
+
+func TestTextOrImageEvidenceUnlocksHumanCheck(t *testing.T) {
+	for _, tc := range []struct {
+		name, kind string
+	}{
+		{name: "text evidence", kind: "text"},
+		{name: "uploaded image", kind: "image"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, at := executionFixture(t)
+
+			ctx := context.Background()
+			if _, err := repo.db.ExecContext(
+				ctx,
+				`UPDATE execution_checks SET human_evidence_requirement='text_or_image' WHERE check_id='c'`,
+			); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := repo.SetHumanCheck(ctx, application.HumanCheckRecord{
+				ExecutionID: "e", CheckID: "c", Checked: true, ExpectedRevision: 1,
+				OperationID: "before", At: at,
+			}); err == nil {
+				t.Fatal("check accepted without evidence")
+			}
+
+			store, err := OpenEvidenceFiles(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			t.Cleanup(func() { _ = store.Close() })
+
+			ids := 0
+			evidence := application.NewExecutionEvidence(repo, store, func() time.Time { return at }, func() string {
+				ids++
+				return fmt.Sprintf("evidence-%d", ids)
+			})
+
+			input := application.AttachHumanEvidenceInput{
+				ExecutionID: "e", CheckID: "c", Kind: tc.kind, Text: "observed",
+				ExpectedRevision: 1, OperationID: "attach", DisplayName: "image.png",
+			}
+			if tc.kind == "image" {
+				input.Text = ""
+
+				var data bytes.Buffer
+				if err := png.Encode(&data, image.NewRGBA(image.Rect(0, 0, 1, 1))); err != nil {
+					t.Fatal(err)
+				}
+
+				input.ImageData = data.Bytes()
+			}
+
+			if _, err := evidence.Attach(ctx, input); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := repo.SetHumanCheck(ctx, application.HumanCheckRecord{
+				ExecutionID: "e", CheckID: "c", Checked: true, ExpectedRevision: 2,
+				OperationID: "after", At: at,
+			}); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}
@@ -874,7 +943,7 @@ func TestExecutionJobResultAndCancellation(t *testing.T) {
 		wantCheck    string
 		wantEvidence int
 	}{
-		{name: "generic prompt success", wantState: "failed", wantCheck: "failed"},
+		{name: "generic prompt success", wantState: "failed", wantCheck: "pending"},
 		{
 			name: "individual success",
 			output: application.ExecutionJobResult{
@@ -901,7 +970,7 @@ func TestExecutionJobResultAndCancellation(t *testing.T) {
 				},
 			},
 			wantState: "failed",
-			wantCheck: "failed",
+			wantCheck: "pending",
 		},
 		{
 			name:      "cancel confirmed",
@@ -994,6 +1063,198 @@ func TestExecutionJobResultAndCancellation(t *testing.T) {
 				t.Fatalf("state=%s check=%s evidence=%d", state, check, evidence)
 			}
 		})
+	}
+}
+
+func TestExecutionChecksPersistInSequence(t *testing.T) {
+	repo, at := executionFixture(t)
+
+	ctx := context.Background()
+	for _, statement := range []string{
+		`UPDATE execution_checks SET ai_status='pending' WHERE execution_id='e' AND check_id='c'`,
+		`INSERT INTO execution_checks(check_id,execution_id,sequence,title,instruction,expected_result,
+suggested_command,ai_required,human_required,ai_status,human_status,human_evidence_requirement)
+VALUES('c2','e',2,'Second','Do second','Done second','',1,1,'pending','pending','none')`,
+	} {
+		if _, err := repo.db.ExecContext(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	_, err := repo.AcceptExecutionJob(ctx, application.ExecutionJobRecord{
+		ExecutionID: "e", JobID: "j", RunID: "r", Kind: "checks", ExpectedRevision: 1,
+		OperationID: "run-op", AcceptedAt: at,
+		Event: application.OutboxEvent{
+			ID: "run-event", Name: "execution.updated",
+			AggregateType: "execution", AggregateID: "e", EmittedAt: at,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	job, err := repo.ClaimExecutionJob(ctx)
+	if err != nil || job == nil || len(job.Checks) != 2 || job.Checks[0].CheckID != "c" ||
+		job.Checks[1].CheckID != "c2" {
+		t.Fatalf("job=%+v err=%v", job, err)
+	}
+
+	first := application.ExecutionCheckResult{CheckID: "c", Status: "completed", Evidence: "first observed"}
+
+	if err := repo.StartExecutionCheck(ctx, *job, job.Checks[0], at); err != nil {
+		t.Fatal(err)
+	}
+
+	view, err := repo.GetExecution(ctx, "p", 10)
+	if err != nil || view.Checks[0].AIStatus != "running" || view.Checks[1].AIStatus != "queued" ||
+		len(view.Conversation) != 1 {
+		t.Fatalf("first started=%+v err=%v", view, err)
+	}
+
+	if err := repo.CompleteExecutionCheck(
+		ctx,
+		*job,
+		job.Checks[0],
+		first,
+		[]string{"read file (completed)"},
+		at.Add(time.Second),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	view, err = repo.GetExecution(ctx, "p", 10)
+	if err != nil || view.Checks[0].AIStatus != "completed" || view.Checks[1].AIStatus != "queued" ||
+		len(view.Checks[0].Evidence) != 1 || len(view.Conversation) != 3 ||
+		view.Conversation[0].Text != "read file (completed)" {
+		t.Fatalf("after first=%+v err=%v", view, err)
+	}
+
+	second := application.ExecutionCheckResult{CheckID: "c2", Status: "failed", Evidence: "second mismatch"}
+
+	if err := repo.StartExecutionCheck(ctx, *job, job.Checks[1], at.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repo.CompleteExecutionCheck(ctx, *job, job.Checks[1], second, nil, at.Add(3*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repo.CompleteExecutionJob(ctx, *job, application.ExecutionJobResult{
+		Checks: []application.ExecutionCheckResult{first, second}, Incremental: true,
+	}, nil, at.Add(4*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+
+	view, err = repo.GetExecution(ctx, "p", 10)
+	if err != nil || view.Checks[0].AIStatus != "completed" || view.Checks[1].AIStatus != "failed" ||
+		len(view.Checks[0].Evidence) != 1 || len(view.Checks[1].Evidence) != 1 || len(view.Conversation) != 5 {
+		t.Fatalf("after second=%+v err=%v", view, err)
+	}
+}
+
+func TestExecutionCheckRemainsSavedWhenRunStops(t *testing.T) {
+	repo, at := executionFixture(t)
+
+	ctx := context.Background()
+	if _, err := repo.db.ExecContext(
+		ctx,
+		`UPDATE execution_checks SET ai_status='pending' WHERE check_id='c'`,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := repo.AcceptExecutionJob(ctx, application.ExecutionJobRecord{
+		ExecutionID: "e", JobID: "j", RunID: "r", Kind: "checks", ExpectedRevision: 1,
+		OperationID: "run-op", AcceptedAt: at,
+		Event: application.OutboxEvent{
+			ID: "run-event", Name: "execution.updated",
+			AggregateType: "execution", AggregateID: "e", EmittedAt: at,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	job, err := repo.ClaimExecutionJob(ctx)
+	if err != nil || job == nil {
+		t.Fatalf("job=%+v err=%v", job, err)
+	}
+
+	if err := repo.StartExecutionCheck(ctx, *job, job.Checks[0], at); err != nil {
+		t.Fatal(err)
+	}
+
+	result := application.ExecutionCheckResult{CheckID: "c", Status: "completed", Evidence: "observed"}
+	if err := repo.CompleteExecutionCheck(ctx, *job, job.Checks[0], result, nil, at); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repo.CompleteExecutionJob(ctx, *job,
+		application.ExecutionJobResult{Checks: []application.ExecutionCheckResult{result}, Incremental: true},
+		errors.New("later failure"), at); err != nil {
+		t.Fatal(err)
+	}
+
+	view, err := repo.GetExecution(ctx, "p", 10)
+	if err != nil || view.Checks[0].AIStatus != "completed" || len(view.Checks[0].Evidence) != 1 {
+		t.Fatalf("saved check=%+v err=%v", view, err)
+	}
+}
+
+func TestExecutionFailureKeepsUnstartedChecksPending(t *testing.T) {
+	repo, at := executionFixture(t)
+
+	ctx := context.Background()
+	for _, statement := range []string{
+		`UPDATE execution_checks SET ai_status='pending' WHERE execution_id='e' AND check_id='c'`,
+		`INSERT INTO execution_checks(check_id,execution_id,sequence,title,instruction,expected_result,
+suggested_command,ai_required,human_required,ai_status,human_status,human_evidence_requirement)
+VALUES('c2','e',2,'Second','Do second','Done second','',1,1,'pending','pending','none')`,
+	} {
+		if _, err := repo.db.ExecContext(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	_, err := repo.AcceptExecutionJob(ctx, application.ExecutionJobRecord{
+		ExecutionID:      "e",
+		JobID:            "j",
+		RunID:            "r",
+		Kind:             "checks",
+		ExpectedRevision: 1,
+		OperationID:      "run-op",
+		AcceptedAt:       at,
+		Event: application.OutboxEvent{
+			ID:            "event",
+			Name:          "execution.updated",
+			AggregateType: "execution",
+			AggregateID:   "e",
+			EmittedAt:     at,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	job, err := repo.ClaimExecutionJob(ctx)
+	if err != nil || job == nil {
+		t.Fatalf("job=%+v err=%v", job, err)
+	}
+
+	if err := repo.StartExecutionCheck(ctx, *job, job.Checks[0], at); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repo.CompleteExecutionJob(ctx, *job, application.ExecutionJobResult{Incremental: true},
+		errors.New("invalid check results: malformed JSON"), at); err != nil {
+		t.Fatal(err)
+	}
+
+	view, err := repo.GetExecution(ctx, "p", 10)
+	if err != nil || view.Checks[0].AIStatus != "failed" || view.Checks[1].AIStatus != "pending" ||
+		view.Checks[0].AIFailureSummary != "invalid check results: malformed JSON" ||
+		len(view.Conversation) != 2 || view.Conversation[0].Text != "invalid check results: malformed JSON" {
+		t.Fatalf("view=%+v err=%v", view, err)
 	}
 }
 
