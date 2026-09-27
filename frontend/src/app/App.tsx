@@ -6,6 +6,7 @@ import { PreparationRoute } from "@/pages/preparation/PreparationRoute";
 import { ExecutionRoute } from "@/pages/execution/ExecutionRoute";
 import { SetupPage } from "@/pages/setup/SetupPage";
 import { ProjectListPage } from "@/pages/projects/ProjectListPage";
+import { ProcedureRoute } from "@/pages/procedure/ProcedureRoute";
 import {
   authenticateAgent,
   checkAuthentication,
@@ -242,6 +243,7 @@ export function App() {
       <Route path="/projects" element={<ProjectListPage />} />
       <Route path="/projects/:projectId/prepare" element={<PreparationRoute />} />
       <Route path="/projects/:projectId/check" element={<ExecutionRoute />} />
+      <Route path="/projects/:projectId/procedure" element={<ProcedureRoute />} />
       <Route path="/projects/:projectId/*" element={<UnimplementedProjectStage />} />
       <Route path="*" element={<Navigate to="/setup" replace />} />
     </Routes>

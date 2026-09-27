@@ -16,11 +16,13 @@ type ProjectService struct {
 	trace    *trace.Writer
 }
 
-func NewProjectService(projects *application.ProjectUseCases, external *application.ProjectExternal) *ProjectService {
-	return &ProjectService{projects: projects, external: external}
+func NewProjectService(
+	projects *application.ProjectUseCases,
+	external *application.ProjectExternal,
+	traceWriter *trace.Writer,
+) *ProjectService {
+	return &ProjectService{projects: projects, external: external, trace: traceWriter}
 }
-
-func (s *ProjectService) SetTrace(writer *trace.Writer) { s.trace = writer }
 
 func (s *ProjectService) traceEntry(ctx context.Context, method, operationID, aggregateID string) context.Context {
 	ctx = trace.WithWriter(ctx, s.trace)

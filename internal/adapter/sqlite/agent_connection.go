@@ -859,6 +859,24 @@ func eventData(ctx context.Context, tx *sql.Tx, event application.OutboxEvent) (
 	correlation := map[string]string{}
 
 	switch event.Name {
+	case "procedure.updated":
+		var (
+			projectID, status string
+			revision          int64
+		)
+		if err := tx.QueryRowContext(ctx, `SELECT project_id,status,revision FROM procedures WHERE procedure_id=?`, event.AggregateID).
+			Scan(&projectID, &status, &revision); err != nil {
+			return nil, nil, err
+		}
+
+		correlation["projectId"] = projectID
+		correlation["procedureId"] = event.AggregateID
+
+		return correlation, map[string]any{
+			"procedureId": event.AggregateID,
+			"status":      status,
+			"revision":    revision,
+		}, nil
 	case "project.deleted":
 		correlation["projectId"] = event.AggregateID
 		return correlation, map[string]any{"projectId": event.AggregateID, "deleted": true}, nil

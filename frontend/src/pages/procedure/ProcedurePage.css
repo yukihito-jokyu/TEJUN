@@ -1,0 +1,421 @@
+.procedure-page {
+  color: var(--foreground);
+  background: var(--background);
+}
+.procedure-header {
+  min-height: 68px;
+  padding: var(--ds-space-3) var(--ds-space-6);
+  border-bottom: var(--ds-border-width-soft) solid var(--border);
+  background: var(--color-card);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-4);
+}
+.procedure-brand,
+.procedure-steps,
+.procedure-steps span {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+}
+.procedure-brand span {
+  width: 1.75rem;
+  height: 1.75rem;
+  display: grid;
+  place-items: center;
+}
+.procedure-header-caption {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--ds-font-size-small);
+}
+.procedure-steps {
+  color: var(--muted-foreground);
+  font-size: var(--ds-font-size-small);
+}
+.procedure-steps b {
+  width: 1.5rem;
+  height: 1.5rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--surface-soft);
+}
+.procedure-steps .active {
+  color: var(--foreground);
+  font-weight: 700;
+}
+.procedure-steps .active b {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+.procedure-layout {
+  display: grid;
+  grid-template-columns: minmax(290px, 34%) minmax(0, 1fr);
+  min-height: calc(100vh - 80px);
+}
+.procedure-chat {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-4);
+  padding: var(--ds-space-6);
+  border-right: var(--ds-border-width-soft) solid var(--border);
+  background: var(--surface-soft);
+}
+.procedure-chat-heading {
+  position: relative;
+}
+.procedure-chat-heading h1 {
+  margin: var(--ds-space-1) 0;
+  font-size: var(--ds-font-size-heading);
+}
+.procedure-eyebrow {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--ds-font-size-small);
+}
+.procedure-status {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--ds-space-1) var(--ds-space-2);
+  border-radius: 999px;
+  background: var(--success-soft);
+  color: var(--success-soft-foreground);
+  font-size: var(--ds-font-size-small);
+  font-weight: 700;
+}
+.procedure-chat-heading .procedure-status {
+  margin-top: var(--ds-space-2);
+}
+.procedure-conversation {
+  flex: 1;
+  min-height: 220px;
+  max-height: 60vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+}
+.procedure-message {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ds-space-2);
+}
+.procedure-message p {
+  margin: 0;
+  padding: var(--ds-space-3);
+  border: var(--ds-border-width-soft) solid var(--border);
+  border-radius: var(--ds-radius-card);
+  background: var(--surface);
+  line-height: 1.6;
+}
+.procedure-message-user {
+  flex-direction: row-reverse;
+}
+.procedure-message-user p {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+.procedure-avatar {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--surface);
+  font-size: var(--ds-font-size-small);
+  font-weight: 700;
+}
+.procedure-suggestions {
+  display: grid;
+  gap: var(--ds-space-2);
+  padding: var(--ds-space-3);
+  border: var(--ds-border-width-soft) solid var(--border);
+  border-radius: var(--ds-radius-card);
+  background: var(--surface);
+}
+.procedure-suggestions button {
+  min-height: var(--ds-control-height-sm);
+  padding: 0 var(--ds-space-3);
+  border: var(--ds-border-width-soft) solid var(--border);
+  border-radius: var(--ds-radius-control);
+  background: var(--surface-soft);
+  color: var(--foreground);
+  text-align: left;
+}
+.procedure-composer {
+  display: grid;
+  gap: var(--ds-space-2);
+  margin-top: auto;
+}
+.procedure-composer label {
+  font-weight: 700;
+}
+.procedure-elicitation {
+  display: grid;
+  gap: var(--ds-space-2);
+  padding: var(--ds-space-3);
+  border: var(--ds-border-width-soft) solid var(--border);
+  border-radius: var(--ds-radius-card);
+  background: var(--surface);
+}
+.procedure-elicitation h2 {
+  margin: 0;
+  font-size: var(--ds-font-size-heading);
+}
+.procedure-elicitation pre {
+  overflow: auto;
+}
+.procedure-workspace {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-4);
+  padding: var(--ds-space-6);
+}
+.procedure-toolbar,
+.procedure-title-row,
+.procedure-actions,
+.procedure-completion,
+.procedure-dialog-header {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-3);
+}
+.procedure-toolbar,
+.procedure-completion,
+.procedure-dialog-header {
+  justify-content: space-between;
+}
+.procedure-toolbar > div > p:last-child,
+.procedure-completion p {
+  margin: var(--ds-space-1) 0 0;
+  color: var(--muted-foreground);
+  font-size: var(--ds-font-size-small);
+}
+.procedure-title-row h2 {
+  margin: 0;
+  font-size: var(--ds-font-size-heading);
+}
+.procedure-actions {
+  flex-wrap: wrap;
+}
+.procedure-document {
+  border: var(--ds-border-width-soft) solid var(--border);
+  border-radius: var(--ds-radius-card);
+  background: var(--surface);
+  overflow: hidden;
+}
+.procedure-intro,
+.procedure-read-step {
+  padding: var(--ds-space-6);
+}
+.procedure-intro {
+  border-bottom: var(--ds-border-width-soft) solid var(--border);
+}
+.procedure-intro h3,
+.procedure-read-step h3 {
+  margin: 0;
+}
+.procedure-intro > p,
+.procedure-read-step > p {
+  line-height: 1.7;
+}
+.procedure-prerequisites {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-2);
+}
+.procedure-prerequisites span {
+  padding: var(--ds-space-1) var(--ds-space-2);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  font-size: var(--ds-font-size-small);
+}
+.procedure-read-step + .procedure-read-step {
+  border-top: var(--ds-border-width-soft) solid var(--border);
+}
+.procedure-step-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-3);
+}
+.procedure-step-heading > span {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-weight: 700;
+}
+.procedure-command {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-3);
+  padding: var(--ds-space-3);
+  border-radius: var(--ds-radius-control);
+  background: var(--foreground);
+  color: var(--background);
+}
+.procedure-command code {
+  overflow-wrap: anywhere;
+}
+.procedure-command button {
+  color: inherit;
+}
+.procedure-note {
+  margin-top: var(--ds-space-3);
+  padding: var(--ds-space-3);
+  border-left: var(--ds-border-width-strong) solid var(--warning);
+  background: var(--warning-soft);
+  color: var(--warning-soft-foreground);
+}
+.procedure-note p {
+  margin: var(--ds-space-1) 0 0;
+}
+.procedure-evidence-link {
+  margin-top: var(--ds-space-3);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-2);
+  color: var(--muted-foreground);
+  font-size: var(--ds-font-size-small);
+}
+.procedure-completion {
+  padding: var(--ds-space-4);
+  border: var(--ds-border-width-soft) solid var(--border);
+  border-radius: var(--ds-radius-card);
+  background: var(--surface);
+}
+.procedure-edit-guidance {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--ds-font-size-small);
+}
+.procedure-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: min(92vw, 700px);
+  max-height: 85vh;
+  overflow: auto;
+  padding: var(--ds-space-6);
+  border: var(--ds-border-width-soft) solid var(--border);
+  border-radius: var(--ds-radius-card);
+  background: var(--surface);
+  color: var(--foreground);
+  box-shadow: var(--ds-shadow-popover);
+}
+.procedure-edit-dialog {
+  width: min(92vw, 860px);
+}
+.procedure-dialog::backdrop {
+  background: rgb(0 0 0 / 60%);
+}
+.procedure-dialog h2,
+.procedure-dialog h3 {
+  margin: 0;
+}
+.procedure-edit-fields {
+  display: grid;
+  gap: var(--ds-space-3);
+  margin: var(--ds-space-4) 0;
+}
+.procedure-edit-fields > label,
+.procedure-step label {
+  font-weight: 700;
+}
+.procedure-step {
+  display: grid;
+  gap: var(--ds-space-3);
+  padding: var(--ds-space-4);
+  border: var(--ds-border-width-soft) solid var(--border);
+  border-radius: var(--ds-radius-control);
+}
+.procedure-step legend {
+  font-weight: 700;
+}
+.procedure-evidence-ref {
+  display: grid;
+  gap: var(--ds-space-2);
+}
+.procedure-check {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+}
+.procedure-evidence-owner,
+.procedure-evidence-other {
+  margin-top: var(--ds-space-4);
+  padding: var(--ds-space-4);
+  border: var(--ds-border-width-soft) solid var(--border);
+  border-radius: var(--ds-radius-card);
+}
+.procedure-evidence-ai {
+  background: var(--surface-soft);
+}
+.procedure-evidence-human {
+  background: var(--success-soft);
+}
+.procedure-evidence-output {
+  overflow: auto;
+  border-radius: var(--ds-radius-control);
+  background: var(--foreground);
+  color: var(--background);
+}
+.procedure-evidence-output strong {
+  display: block;
+  padding: var(--ds-space-2) var(--ds-space-3);
+  border-bottom: var(--ds-border-width-soft) solid var(--border);
+}
+.procedure-evidence-output pre {
+  margin: 0;
+  padding: var(--ds-space-4);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.procedure-dialog img {
+  max-width: 100%;
+  height: auto;
+}
+@media (max-width: 900px) {
+  .procedure-header {
+    flex-wrap: wrap;
+  }
+  .procedure-layout {
+    grid-template-columns: 1fr;
+  }
+  .procedure-chat {
+    border-right: 0;
+    border-bottom: var(--ds-border-width-soft) solid var(--border);
+  }
+  .procedure-conversation {
+    min-height: 140px;
+    max-height: 300px;
+  }
+}
+@media (max-width: 640px) {
+  .procedure-chat,
+  .procedure-workspace,
+  .procedure-dialog {
+    padding: var(--ds-space-3);
+  }
+  .procedure-toolbar,
+  .procedure-completion {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .procedure-intro,
+  .procedure-read-step {
+    padding: var(--ds-space-4);
+  }
+}

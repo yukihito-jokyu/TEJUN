@@ -71,7 +71,10 @@ func Run(assets fs.FS) (runErr error) {
 
 	exporter := appexport.NewExporter()
 
-	var previewReader previewReader
+	var (
+		previewReader previewReader
+		evidenceStore *appsqlite.EvidenceStore
+	)
 
 	if appsqlite.SupportsEvidencePath() {
 		evidence, err := appsqlite.NewEvidenceStore(db, dataDir)
@@ -83,14 +86,11 @@ func Run(assets fs.FS) (runErr error) {
 
 		projectRepository.SetEvidenceStore(evidence)
 		previewReader = evidence
+		evidenceStore = evidence
 
 		if err := evidence.Reconcile(context.Background()); err != nil {
 			return err
 		}
-
-		exporter.SetEvidenceReader(func(procedureID, evidenceID string) ([]byte, error) {
-			return evidence.ReadForProcedure(context.Background(), procedureID, evidenceID)
-		})
 	}
 
 	if err := projectExternalRepository.FailInterruptedProjectJobs(context.Background(), now()); err != nil {
@@ -132,15 +132,15 @@ func Run(assets fs.FS) (runErr error) {
 	preparationAgentControl := appusecase.NewPreparationAgentControl(preparationRepository, manager, now, newID)
 	projects := appusecase.NewProjectUseCases(projectRepository, appworkspace.Validator{}, now, newID)
 	projectExternal := appusecase.NewProjectExternal(projectExternalRepository, exporter, now, newID)
-	projectService := appwails.NewProjectService(projects, projectExternal)
-	projectService.SetTrace(traceWriter)
-
-	agentControlService := appwails.NewAgentControlService(agentControl, preparationAgentControl, executionRunner)
+	projectService := appwails.NewProjectService(projects, projectExternal, traceWriter)
 
 	serviceOptions := application.ServiceOptions{MarshalError: appwails.MarshalError}
 	assetHandler := http.Handler(application.AssetFileServerFS(assets))
 
-	var previewURL func(string, string, string, string) string
+	var (
+		previewURL  func(string, string, string, string) string
+		verifyImage func(context.Context, string, string, string, string) error
+	)
 
 	if previewReader != nil {
 		preview, err := newEvidencePreview(previewReader, assetHandler)
@@ -150,7 +150,59 @@ func Run(assets fs.FS) (runErr error) {
 
 		assetHandler = preview
 		previewURL = preview.URL
+		verifyImage = func(ctx context.Context, project, execution, check, evidence string) error {
+			_, mime, err := previewReader.ReadForExecution(ctx, project, execution, check, evidence)
+			if err == nil && mime != "image/png" && mime != "image/jpeg" {
+				return errors.New("画像のMIMEが不正です")
+			}
+
+			return err
+		}
 	}
+
+	procedureRepository := appsqlite.NewProcedureRepository(db, evidenceFiles)
+
+	if evidenceStore != nil {
+		exporter.SetEvidenceReader(func(procedureID, evidenceID string) (appexport.EvidenceContent, error) {
+			ctx := context.Background()
+
+			record, err := procedureRepository.GetEvidence(ctx, procedureID, evidenceID)
+			if err != nil {
+				return appexport.EvidenceContent{}, err
+			}
+
+			if record.Kind == "text" {
+				return appexport.EvidenceContent{Kind: "text", Data: []byte(record.Text)}, nil
+			}
+
+			if record.Kind != "image" {
+				return appexport.EvidenceContent{}, errors.New("証跡の種類が不正です")
+			}
+
+			data, err := evidenceStore.ReadForGeneratedProcedure(ctx, procedureID, evidenceID)
+
+			return appexport.EvidenceContent{Kind: "image", Data: data}, err
+		})
+	}
+
+	if err := procedureRepository.FailInterruptedProcedureRevisions(context.Background(), now()); err != nil {
+		return err
+	}
+
+	procedureRevision := appusecase.NewProcedureRevision(procedureRepository, manager, now, newID)
+	agentControlService := appwails.NewAgentControlService(
+		agentControl, preparationAgentControl, executionRunner, procedureRevision, traceWriter,
+	)
+
+	procedure := appusecase.NewProcedure(procedureRepository, now, newID)
+	procedureService := appwails.NewProcedureService(
+		procedure,
+		procedureRepository,
+		projectService,
+		procedureRevision,
+		previewURL,
+		verifyImage,
+	)
 
 	executionService := appwails.NewExecutionService(execution, executionRunner, executionPermission, executionEvidence,
 		previewURL)
@@ -162,7 +214,7 @@ func Run(assets fs.FS) (runErr error) {
 			application.NewServiceWithOptions(projectService, serviceOptions),
 			application.NewServiceWithOptions(appwails.NewPreparationService(preparation), serviceOptions),
 			application.NewServiceWithOptions(executionService, serviceOptions),
-			application.NewServiceWithOptions(&appwails.ProcedureService{}, serviceOptions),
+			application.NewServiceWithOptions(procedureService, serviceOptions),
 			application.NewServiceWithOptions(agentControlService, serviceOptions),
 		},
 		Assets: application.AssetOptions{Handler: assetHandler},
@@ -172,12 +224,13 @@ func Run(assets fs.FS) (runErr error) {
 
 	var workers sync.WaitGroup
 
-	workers.Add(6)
+	workers.Add(7)
 	go runAgentWorker(workerContext, &workers, repository, manager, now)
 	go runProjectWorker(workerContext, &workers, projectExternalRepository, manager, exporter, now)
 	go runPreparationWorker(workerContext, &workers, preparationRepository, manager, now)
 	go runPreparationCancellationWorker(workerContext, &workers, preparationRepository, manager, now)
 	go runExecutionWorker(workerContext, &workers, executionRunner)
+	go runProcedureRevisionWorker(workerContext, &workers, procedureRevision)
 	go runEventDispatcher(workerContext, &workers, repository, app.Event.Emit, now)
 
 	app.OnShutdown(func() {
@@ -388,4 +441,20 @@ func dataDirectory() (string, error) {
 	}
 
 	return filepath.Join(configDir, "TEJUN"), nil
+}
+
+func runProcedureRevisionWorker(ctx context.Context, wg *sync.WaitGroup, worker *appusecase.ProcedureRevision) {
+	defer wg.Done()
+
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		_, _ = worker.RunOne(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }

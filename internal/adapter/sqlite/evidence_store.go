@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/yukihito-jokyu/TEJUN/internal/application"
 )
@@ -64,16 +63,20 @@ func (f *EvidenceFiles) Stage(ctx context.Context, sourcePath string) (applicati
 		return application.StagedEvidence{}, errors.New("image source must be a regular file within size limit")
 	}
 
-	fd, err := syscall.Open(sourcePath, syscall.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	parent, err := os.OpenRoot(filepath.Dir(sourcePath))
 	if err != nil {
 		return application.StagedEvidence{}, err
 	}
+	defer func() { _ = parent.Close() }()
 
-	source := os.NewFile(uintptr(fd), sourcePath)
+	source, err := parent.Open(filepath.Base(sourcePath))
+	if err != nil {
+		return application.StagedEvidence{}, err
+	}
 	defer func() { _ = source.Close() }()
 
-	info, err = source.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Size() > maxEvidenceBytes {
+	opened, err := source.Stat()
+	if err != nil || !os.SameFile(info, opened) || !opened.Mode().IsRegular() || opened.Size() > maxEvidenceBytes {
 		return application.StagedEvidence{}, errors.New("image source changed or is too large")
 	}
 
@@ -215,6 +218,15 @@ func (f *EvidenceFiles) Verify(ctx context.Context, staged application.StagedEvi
 	info, err := file.Stat()
 	if err != nil || !info.Mode().IsRegular() || info.Size() != staged.Size {
 		return false, nil
+	}
+
+	var header [8]byte
+	if _, err := io.ReadFull(file, header[:]); err != nil || httpImageMime(header[:]) != staged.MIME {
+		return false, nil
+	}
+
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return false, err
 	}
 
 	hash := sha256.New()

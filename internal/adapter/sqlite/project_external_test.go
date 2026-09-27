@@ -317,11 +317,11 @@ func TestExportCompletionCommitFailureReconcilesPublishedFile(t *testing.T) {
 
 			want := "succeeded"
 			if !test.published {
-				want = "interrupted"
+				want = "pending"
 			}
 
 			if !test.published {
-				if exportState != "failed" || jobState != want {
+				if exportState != want || jobState != want {
 					t.Fatalf("states = %s / %s", exportState, jobState)
 				}
 
@@ -381,6 +381,120 @@ func TestExportReplayAfterFreshPrepare(t *testing.T) {
 		} else if result.Data.ExportID != first.Data.ExportID || result.Receipt.OperationID != first.Receipt.OperationID {
 			t.Fatalf("replay = %+v, want %+v", result, first)
 		}
+	}
+}
+
+func TestExportRecoversAfterRestart(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		running bool
+	}{
+		{name: "pending"},
+		{name: "running", running: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			project := projectTestDB(t)
+
+			ctx := context.Background()
+			if _, err := project.CreateProject(ctx, projectRecord("project", "create")); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := project.db.Exec(
+				`INSERT INTO procedures(procedure_id,project_id,revision,status,document_json,created_at,completed_at)
+VALUES('procedure','project',1,'completed','{"title":"recovered","steps":[]}',1,1)`,
+			); err != nil {
+				t.Fatal(err)
+			}
+
+			oldExporter := appexport.NewExporter()
+			path := filepath.Join(t.TempDir(), "procedure.md")
+
+			selection, _, err := oldExporter.Verify(path, "procedure", 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			repository := NewProjectExternalRepository(project.db)
+			now := time.Date(2026, 9, 26, 1, 2, 3, 0, time.UTC)
+
+			accepted, err := repository.AcceptExport(ctx, application.ProjectExportRecord{
+				ExportProcedureInput: application.ExportProcedureInput{
+					ProcedureID: "procedure", ProcedureRevision: 1, Format: "markdown",
+					Destination: selection, OperationID: "same-operation",
+				},
+				ExportID: "export", JobID: "job", RequestHash: "same",
+				Receipt: application.MutationReceipt{OperationID: "same-operation", CommittedAt: now},
+				Event: application.OutboxEvent{
+					ID: "accepted", Name: "export.updated", AggregateType: "export",
+					AggregateID: "export", EmittedAt: now,
+				},
+			})
+			if err != nil || accepted.Data.JobID != "job" {
+				t.Fatalf("accepted = %+v, error = %v", accepted, err)
+			}
+
+			if test.running {
+				if _, err := repository.ClaimProjectJob(ctx); err != nil {
+					t.Fatal(err)
+				}
+
+				if err := repository.MarkExportReady(ctx, "export", strings.Repeat("0", 64)); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			if err := oldExporter.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := repository.FailInterruptedProjectJobs(ctx, now.Add(time.Minute)); err != nil {
+				t.Fatal(err)
+			}
+
+			var exportState, jobState string
+			if err := project.db.QueryRow(`SELECT e.state,j.state FROM exports e JOIN background_jobs j ON j.target_id=e.export_id WHERE e.export_id='export'`).
+				Scan(&exportState, &jobState); err != nil {
+				t.Fatal(err)
+			}
+
+			if exportState != "pending" || jobState != "pending" {
+				t.Fatalf("recovered states = %s / %s", exportState, jobState)
+			}
+
+			replayed, found, err := repository.ExistingExport(ctx, "same-operation", "same")
+			if err != nil || !found || replayed.Data.JobID != "job" {
+				t.Fatalf("replay = %+v, found=%v, error=%v", replayed, found, err)
+			}
+
+			newExporter := appexport.NewExporter()
+			defer func() { _ = newExporter.Close() }()
+
+			ran, err := application.RunProjectJob(
+				ctx,
+				repository,
+				nil,
+				newExporter,
+				func() time.Time { return now.Add(2 * time.Minute) },
+			)
+			if !ran || err != nil {
+				t.Fatalf("worker = %v, %v", ran, err)
+			}
+
+			content, err := os.ReadFile(path)
+			if err != nil || string(content) != "# recovered\n\n" {
+				t.Fatalf("content = %q, error = %v", content, err)
+			}
+
+			if err := project.db.QueryRow(`SELECT e.state,j.state FROM exports e JOIN background_jobs j ON j.target_id=e.export_id WHERE e.export_id='export'`).
+				Scan(&exportState, &jobState); err != nil {
+				t.Fatal(err)
+			}
+
+			if exportState != "succeeded" || jobState != "succeeded" {
+				t.Fatalf("final states = %s / %s", exportState, jobState)
+			}
+		})
 	}
 }
 

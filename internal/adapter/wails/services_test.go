@@ -43,6 +43,23 @@ func TestPreparationBindingMethods(t *testing.T) {
 	}
 }
 
+func TestInternalDependencySettersNotBound(t *testing.T) {
+	tests := []struct {
+		name    string
+		service any
+	}{
+		{name: "SetProcedureRevision", service: &AgentControlService{}},
+		{name: "SetTrace", service: &ProjectService{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, ok := reflect.TypeOf(tt.service).MethodByName(tt.name); ok {
+				t.Fatal("internal dependency setter exposed as Binding")
+			}
+		})
+	}
+}
+
 func TestEmptyCollectionIsNotNull(t *testing.T) {
 	tests := []struct {
 		name  string

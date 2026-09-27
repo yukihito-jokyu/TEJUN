@@ -4,10 +4,30 @@ import (
 	"context"
 	"database/sql"
 	"io/fs"
+	"net/url"
+	"path/filepath"
 	"testing"
 
 	"github.com/pressly/goose/v3"
 )
+
+func TestDataSourceNameUsesLocalFileURI(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+
+	parsed, err := url.Parse(dataSourceName(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantPath := filepath.ToSlash(path)
+	if volume := filepath.VolumeName(path); len(volume) == 2 && volume[1] == ':' {
+		wantPath = "/" + wantPath
+	}
+
+	if parsed.Scheme != "file" || parsed.Host != "" || parsed.Path != wantPath {
+		t.Fatalf("database URI = %s, want local file path %s", parsed.String(), path)
+	}
+}
 
 func TestOpenUpgradesPreparationTurnColumns(t *testing.T) {
 	ctx := context.Background()
@@ -107,8 +127,8 @@ func TestOpenAppliesMigrationsAndPragmas(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if version != 9 {
-				t.Fatalf("version=%d, want 9", version)
+			if version != 11 {
+				t.Fatalf("version=%d, want 11", version)
 			}
 
 			assertPragmasOnTwoConnections(t, db)
@@ -200,8 +220,10 @@ func TestOpenUpgradesExistingExecution(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := provider.Down(ctx); err != nil {
-		t.Fatal(err)
+	for range 3 {
+		if _, err := provider.Down(ctx); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	if _, err := db.ExecContext(ctx, `INSERT INTO executions(execution_id, project_id, session_id, revision, started_at)
@@ -209,8 +231,10 @@ VALUES ('legacy', 'p', 's', 1, '')`); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := provider.Up(ctx); err != nil {
-		t.Fatal(err)
+	for range 3 {
+		if _, err := provider.Up(ctx); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	var status, startedAt string

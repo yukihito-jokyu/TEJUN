@@ -57,7 +57,12 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 }
 
 func dataSourceName(path string) string {
-	fileURL := (&url.URL{Scheme: "file", Path: filepath.ToSlash(path)}).String()
+	filePath := filepath.ToSlash(path)
+	if volume := filepath.VolumeName(path); len(volume) == 2 && volume[1] == ':' {
+		filePath = "/" + filePath
+	}
+
+	fileURL := (&url.URL{Scheme: "file", Path: filePath}).String()
 
 	return fileURL + "?" + strings.Join([]string{
 		"_txlock=immediate",

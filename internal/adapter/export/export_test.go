@@ -5,11 +5,40 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/yukihito-jokyu/TEJUN/internal/application"
+	"github.com/yukihito-jokyu/TEJUN/internal/domain/shared"
 )
+
+func TestDestinationError(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		err  error
+		code string
+	}{
+		{name: "permission denied", err: &os.PathError{Op: "open", Path: "/private/secret", Err: syscall.EACCES}, code: "destination_permission_denied"},
+		{name: "operation not permitted", err: &os.PathError{Op: "open", Path: "/private/secret", Err: syscall.EPERM}, code: "destination_permission_denied"},
+		{name: "missing directory", err: os.ErrNotExist, code: "validation_error"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := destinationError(test.err)
+
+			var userError *shared.Error
+			if !errors.As(err, &userError) || userError.Code != test.code {
+				t.Fatalf("destinationError() = %v, want code %q", err, test.code)
+			}
+
+			if userError.Message == "" || userError.FieldErrors["destination"] == "" ||
+				strings.Contains(err.Error(), "/private/secret") {
+				t.Fatalf("error leaks path or lacks message: %v", err)
+			}
+		})
+	}
+}
 
 func TestExportPreservesExistingOutput(t *testing.T) {
 	document := []byte(`{"title":"新しい手順","steps":[]}`)
@@ -77,13 +106,17 @@ func TestExportPreservesExistingOutput(t *testing.T) {
 				OverwriteIdentity:  identity,
 			}
 
-			err = exporter.Export(context.Background(), job, func(string) error {
-				if test.markFails {
-					return errors.New("DB commit failed")
-				}
+			err = exporter.Export(
+				context.Background(),
+				job,
+				func(string) error {
+					if test.markFails {
+						return errors.New("DB commit failed")
+					}
 
-				return nil
-			})
+					return nil
+				},
+			)
 			if (err != nil) != test.wantError {
 				t.Fatalf("Export error = %v, wantError %t", err, test.wantError)
 			}
@@ -140,6 +173,83 @@ func TestPreparedSelectionValidation(t *testing.T) {
 			_, err = exporter.VerifyPrepared(selection, test.procedureID, test.revision)
 			if (err != nil) != test.wantError {
 				t.Fatalf("VerifyPrepared error = %v, wantError %t", err, test.wantError)
+			}
+		})
+	}
+}
+
+func TestExportRecoveryRevalidatesDestination(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		swapParent bool
+	}{
+		{name: "parent changed", swapParent: true},
+		{name: "overwrite changed"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			base := t.TempDir()
+			first := filepath.Join(base, "first")
+			second := filepath.Join(base, "second")
+
+			for _, dir := range []string{first, second} {
+				if err := os.Mkdir(dir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			link := filepath.Join(base, "selected")
+			if err := os.Symlink(first, link); err != nil {
+				t.Fatal(err)
+			}
+
+			path := filepath.Join(link, "procedure.md")
+			if !test.swapParent {
+				if err := os.WriteFile(path, []byte("original"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			before := NewExporter()
+
+			selection, identity, err := before.Verify(path, "procedure", 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if err := before.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			if test.swapParent {
+				if err := os.Remove(link); err != nil {
+					t.Fatal(err)
+				}
+
+				if err := os.Symlink(second, link); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(path, []byte("changed"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			after := NewExporter()
+			defer func() { _ = after.Close() }()
+
+			err = after.Export(context.Background(), application.ClaimedProjectJob{
+				Kind: "export", Format: "markdown", ProcedureID: "procedure", ProcedureRevision: 1,
+				DocumentJSON: []byte(`{"title":"new","steps":[]}`), Destination: selection,
+				OverwriteConfirmed: identity != nil, OverwriteIdentity: identity,
+			}, func(string) error { return nil })
+			if err == nil {
+				t.Fatal("changed destination was accepted")
+			}
+
+			if test.swapParent {
+				if _, err := os.Stat(filepath.Join(second, "procedure.md")); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("unexpected output in changed parent: %v", err)
+				}
+			} else if content, err := os.ReadFile(path); err != nil || string(content) != "changed" {
+				t.Fatalf("changed target = %q, error = %v", content, err)
 			}
 		})
 	}

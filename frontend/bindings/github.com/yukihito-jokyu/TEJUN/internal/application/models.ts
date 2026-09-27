@@ -4,6 +4,9 @@
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
 import * as execution$0 from "../domain/execution/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as procedure$0 from "../domain/procedure/models.js";
 
 export interface AcceptedTurn {
     "sessionId": string;
@@ -202,6 +205,88 @@ export interface PreparationView {
     "changeSequence": number;
 }
 
+export interface ProcedureActiveRevision {
+    "sessionId": string;
+    "turnId": string;
+    "jobId": string;
+    "status": string;
+}
+
+export interface ProcedureCompleteInput {
+    "procedureId": string;
+    "expectedRevision": number;
+    "operationId": string;
+}
+
+export interface ProcedureCompleted {
+    "procedureId": string;
+    "revision": number;
+    "status": procedure$0.Status;
+    "completedAt": string;
+    "projectId": string;
+    "projectRevision": number;
+}
+
+export interface ProcedureEvidenceSummary {
+    "evidenceId": string;
+    "actor": string;
+    "kind": string;
+    "displayName": string;
+    "createdAt": string;
+}
+
+export interface ProcedureSaveInput {
+    "procedureId": string;
+    "expectedRevision": number;
+    "operationId": string;
+    "document": procedure$0.Document;
+}
+
+export interface ProcedureSaved {
+    "procedureId": string;
+    "revision": number;
+    "document": procedure$0.Document;
+    "integrity": procedure$0.Integrity;
+    "updatedAt": string;
+}
+
+export interface ProcedureSourceSummary {
+    "executionId": string;
+    "executionRevision": number;
+    "checkCount": number;
+    "evidenceCount": number;
+    "capturedAt": string;
+}
+
+export interface ProcedureSummary {
+    "procedureId": string;
+    "revisionNumber": number;
+    "revision": number;
+    "status": procedure$0.Status;
+    "document": procedure$0.Document;
+    "createdAt": string;
+    "updatedAt": string;
+    "completedAt": string | null;
+}
+
+export interface ProcedureView {
+    "project": ProjectHeader;
+    "procedure": ProcedureSummary;
+    "source": ProcedureSourceSummary;
+    "evidence": {"ai": ProcedureEvidenceSummary[] | null, "human": ProcedureEvidenceSummary[] | null};
+    "integrity": procedure$0.Integrity;
+    "conversation": ConversationPage;
+    "activeRevision": ProcedureActiveRevision | null;
+    "elicitations": ElicitationRequestView[] | null;
+    "changeSequence": number;
+}
+
+export interface ProcedureViewQuery {
+    "projectId": string;
+    "conversationCursor": number | null;
+    "conversationLimit": number;
+}
+
 export interface ProjectHeader {
     "projectId": string;
     "name": string;
@@ -225,6 +310,13 @@ export interface ReadinessIssue {
     "message": string;
     "checkId": string;
     "evidenceRequirement": string;
+}
+
+export interface RequestProcedureRevisionInput {
+    "procedureId": string;
+    "expectedRevision": number;
+    "content": ContentPart[] | null;
+    "operationId": string;
 }
 
 export interface RunSummary {
