@@ -48,8 +48,10 @@ func TestOpenUpgradesPreparationTurnColumns(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := provider.Down(ctx); err != nil {
-		t.Fatal(err)
+	for range 2 {
+		if _, err := provider.Down(ctx); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	if err := db.Close(); err != nil {
@@ -87,6 +89,67 @@ func TestOpenUpgradesPreparationTurnColumns(t *testing.T) {
 	t.Fatal("plan_revision column missing after upgrade")
 }
 
+func TestHTMLExportMigrationPreservesHistory(t *testing.T) {
+	ctx := context.Background()
+
+	repo := projectTestDB(t)
+	if _, err := repo.CreateProject(ctx, projectRecord("p", "create:p")); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := repo.db.ExecContext(
+		ctx,
+		`INSERT INTO procedures(procedure_id,project_id,revision,status,document_json,created_at) VALUES('proc','p',1,'completed','{}',1)`,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	migrationFS, err := fs.Sub(migrations, "migration")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	provider, err := goose.NewProvider(goose.DialectSQLite3, repo.db, migrationFS, goose.WithLogger(goose.NopLogger()))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := provider.Down(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, format := range []string{"markdown", "pdf"} {
+		if _, err := repo.db.ExecContext(
+			ctx,
+			`INSERT INTO exports(export_id,project_id,procedure_id,procedure_revision,format,destination_display_name,destination_path,destination_metadata_json,state,accepted_at) VALUES(?, 'p','proc',1,?,'name','/tmp/out','{}','succeeded',1)`,
+			format,
+			format,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := provider.Up(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, format := range []string{"markdown", "pdf"} {
+		var got string
+		if err := repo.db.QueryRowContext(ctx, `SELECT format FROM exports WHERE export_id=?`, format).
+			Scan(&got); err != nil ||
+			got != format {
+			t.Fatalf("history format=%q err=%v", got, err)
+		}
+	}
+
+	if _, err := repo.db.ExecContext(
+		ctx,
+		`INSERT INTO exports(export_id,project_id,procedure_id,procedure_revision,format,destination_display_name,destination_path,destination_metadata_json,state,accepted_at) VALUES('html','p','proc',1,'html','name','/tmp/out','{}','pending',1)`,
+	); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCommandEvidenceMigrationUpgradesExistingChecks(t *testing.T) {
 	for _, tc := range []struct {
 		name, command, want string
@@ -109,7 +172,7 @@ func TestCommandEvidenceMigrationUpgradesExistingChecks(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			for range 2 {
+			for range 3 {
 				if _, err := provider.Down(ctx); err != nil {
 					t.Fatal(err)
 				}
@@ -156,8 +219,10 @@ func TestProcedureCommandMigrationRestoresGeneratedDraft(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := provider.Down(ctx); err != nil {
-		t.Fatal(err)
+	for range 2 {
+		if _, err := provider.Down(ctx); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	if _, err := repo.db.ExecContext(ctx, `INSERT INTO procedures
@@ -223,8 +288,8 @@ func TestOpenAppliesMigrationsAndPragmas(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if version != 13 {
-				t.Fatalf("version=%d, want 13", version)
+			if version != 14 {
+				t.Fatalf("version=%d, want 14", version)
 			}
 
 			assertPragmasOnTwoConnections(t, db)
@@ -316,7 +381,7 @@ func TestOpenUpgradesExistingExecution(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for range 5 {
+	for range 6 {
 		if _, err := provider.Down(ctx); err != nil {
 			t.Fatal(err)
 		}
@@ -327,7 +392,7 @@ VALUES ('legacy', 'p', 's', 1, '')`); err != nil {
 		t.Fatal(err)
 	}
 
-	for range 5 {
+	for range 6 {
 		if _, err := provider.Up(ctx); err != nil {
 			t.Fatal(err)
 		}
