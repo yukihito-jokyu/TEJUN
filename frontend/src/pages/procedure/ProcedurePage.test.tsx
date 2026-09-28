@@ -89,6 +89,56 @@ function props() {
 }
 
 describe("ProcedurePage", () => {
+  it("AI修正後の本文だけ強調し、直接編集は強調しない", () => {
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const input = props();
+    const { container, rerender } = render(<ProcedurePage {...input} />);
+    expect(container.querySelector(".procedure-ai-update")).toBeNull();
+    rerender(
+      <ProcedurePage
+        {...input}
+        view={{
+          ...view,
+          procedure: {
+            ...view.procedure,
+            document: { ...view.procedure.document, title: "直接編集" },
+          },
+        }}
+      />,
+    );
+    expect(container.querySelector(".procedure-ai-update")).toBeNull();
+    rerender(
+      <ProcedurePage
+        {...input}
+        view={{
+          ...view,
+          activeRevision: { sessionId: "s", turnId: "t", jobId: "j", status: "running" },
+          procedure: {
+            ...view.procedure,
+            document: { ...view.procedure.document, title: "直接編集" },
+          },
+        }}
+      />,
+    );
+    rerender(
+      <ProcedurePage
+        {...input}
+        view={{
+          ...view,
+          procedure: {
+            ...view.procedure,
+            document: { ...view.procedure.document, title: "AI修正" },
+          },
+        }}
+      />,
+    );
+    expect(container.querySelector(".procedure-document.procedure-ai-update")).toBeTruthy();
+    vi.unstubAllGlobals();
+  });
   it("会話を役割別アイコンと改行を保った吹き出しで表示する", () => {
     const input = props();
     const messages: ProcedureView["conversation"]["items"] = [
