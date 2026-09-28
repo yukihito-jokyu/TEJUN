@@ -447,6 +447,8 @@ describe("ProcedurePage", () => {
       />,
     );
     expect(screen.queryByRole("button", { name: "直接編集" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "HTMLを出力" }));
+    await waitFor(() => expect(input.onExport).toHaveBeenCalledWith("html", 3, expect.any(String)));
     fireEvent.click(screen.getByRole("button", { name: "PDFを出力" }));
     await waitFor(() => expect(input.onExport).toHaveBeenCalledWith("pdf", 3, expect.any(String)));
   });
