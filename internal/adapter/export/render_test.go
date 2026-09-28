@@ -23,6 +23,7 @@ func TestRender(t *testing.T) {
 	}{
 		{name: "markdown", format: "markdown", prefix: "# 日本語の手順書"},
 		{name: "pdf", format: "pdf", prefix: "%PDF-"},
+		{name: "html", format: "html", prefix: "<!doctype html>"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -33,6 +34,69 @@ func TestRender(t *testing.T) {
 
 			if !strings.HasPrefix(output.String(), test.prefix) {
 				t.Fatalf("output lacks %q", test.prefix)
+			}
+		})
+	}
+}
+
+func TestHTMLEscapesContentAndEmbedsEvidence(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
+
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, img); err != nil {
+		t.Fatal(err)
+	}
+
+	document := []byte(
+		`{"title":"<script>alert(1)</script>","overview":"<&>","prerequisites":["<準備>"],"steps":[{"title":"開始","description":"<&>","command":"echo '<>&'","notes":["<注意>"],"evidenceRefs":[{"evidenceId":"image","displayName":"<画像>","included":true},{"evidenceId":"text","displayName":"記録","included":true}]}]}`,
+	)
+
+	tests := []struct {
+		name      string
+		kind      string
+		wantError bool
+	}{
+		{name: "valid"},
+		{name: "corrupt image", kind: "corrupt", wantError: true},
+		{name: "missing reader", kind: "missing", wantError: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var (
+				output bytes.Buffer
+				read   func(string, string) (EvidenceContent, error)
+			)
+			if test.kind != "missing" {
+				read = func(_, id string) (EvidenceContent, error) {
+					if id == "text" {
+						return EvidenceContent{Kind: "text", Data: []byte("<observed>")}, nil
+					}
+
+					if test.kind == "corrupt" {
+						return EvidenceContent{Kind: "image", Data: []byte("broken")}, nil
+					}
+
+					return EvidenceContent{Kind: "image", Data: encoded.Bytes()}, nil
+				}
+			}
+
+			err := RenderWithEvidence("html", document, "procedure", read, &output)
+			if (err != nil) != test.wantError {
+				t.Fatalf("error = %v, wantError %t", err, test.wantError)
+			}
+
+			if test.wantError {
+				return
+			}
+
+			for _, want := range []string{"&lt;script&gt;", "&lt;&amp;&gt;", "&lt;準備&gt;", "&lt;注意&gt;", "&lt;observed&gt;", "data:image/png;base64,"} {
+				if !strings.Contains(output.String(), want) {
+					t.Errorf("HTML lacks %q", want)
+				}
+			}
+
+			if strings.Contains(output.String(), "<script>") {
+				t.Fatal("unescaped script")
 			}
 		})
 	}
