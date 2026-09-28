@@ -247,7 +247,7 @@ func (u *ProjectExternal) ExportProcedure(
 		return MutationResult[ExportAccepted]{}, fieldError("procedureId", "出力対象が不正です")
 	}
 
-	if input.Format != "markdown" && input.Format != "pdf" {
+	if input.Format != "markdown" && input.Format != "pdf" && input.Format != "html" {
 		return MutationResult[ExportAccepted]{}, fieldError("format", "出力形式が不正です")
 	}
 
@@ -256,8 +256,12 @@ func (u *ProjectExternal) ExportProcedure(
 	}
 
 	extension := ".md"
-	if input.Format == "pdf" {
+
+	switch input.Format {
+	case "pdf":
 		extension = ".pdf"
+	case "html":
+		extension = ".html"
 	}
 
 	if !strings.EqualFold(filepath.Ext(input.Destination.AbsolutePath), extension) {
