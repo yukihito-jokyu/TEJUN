@@ -430,6 +430,47 @@ test("AIチェックの実行中に各項目のログと証跡を順に表示す
   await expect(page.getByRole("button", { name: "AIチェックを実行" })).toBeDisabled();
 });
 
+test("AI結果の更新ごとに演出し、初回表示と動きを減らす設定では演出しない", async ({ page }) => {
+  const state = snapshot();
+  await mockExecution(page, state);
+  await page.goto("/#/projects/p/check");
+  const result = page.getByRole("region", { name: "画面を確認のAIチェック" });
+  await expect(result).toBeVisible();
+  await expect(result).not.toHaveClass(/execution-ai-update/);
+  await result.evaluate((element) => {
+    element.addEventListener("animationstart", (event) => {
+      if ((event as AnimationEvent).pseudoElement !== "::after") return;
+      element.dataset.animationStarts = String(Number(element.dataset.animationStarts ?? 0) + 1);
+    });
+  });
+
+  await page.getByRole("button", { name: "AIチェックを実行" }).click();
+  state.checks[0].ai = side(true);
+  state.changeSequence++;
+  await expect(result).toHaveClass(/execution-ai-update/);
+  await expect(result).toContainText("完了");
+  await expect(result).toHaveAttribute("data-animation-starts", "1");
+  await expect(result).toHaveCSS("clip-path", "none");
+  await expect(result).toHaveCSS("opacity", "1");
+  await expect(result).toHaveCSS("transform", "none");
+
+  state.checks[0].ai = { ...side(), status: "failed", failureSummary: "再確認が必要" };
+  state.changeSequence++;
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await expect(result).toContainText("再確認が必要");
+  await expect(result).toHaveAttribute("data-animation-starts", "2");
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  state.checks[0].ai = side(true);
+  state.changeSequence++;
+  await expect(result).toContainText("完了");
+  await expect(result).toHaveClass(/execution-ai-update/);
+  await expect(result).toHaveCSS("animation-name", "none");
+  expect(
+    await result.evaluate((element) => getComputedStyle(element, "::after").animationName),
+  ).toBe("none");
+});
+
 test("画像の貼り付けとドロップで証跡を追加する", async ({ page }) => {
   const state = snapshot();
   state.checks[0].ai = side(true);
