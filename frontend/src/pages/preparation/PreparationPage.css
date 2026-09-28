@@ -6,6 +6,7 @@
   background: var(--color-background);
   color: var(--color-foreground);
 }
+
 .preparation-header {
   flex: none;
   min-height: 68px;
