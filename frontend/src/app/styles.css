@@ -849,3 +849,50 @@
   min-width: var(--cell-size);
   min-height: var(--cell-size);
 }
+
+.preparation-ai-update,
+.execution-ai-update,
+.procedure-ai-update {
+  position: relative;
+  overflow: hidden;
+}
+.preparation-ai-update::after,
+.execution-ai-update::after,
+.procedure-ai-update::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 200%;
+  aspect-ratio: 1;
+  border: calc(var(--ds-focus-width) * 4) solid var(--ring);
+  border-radius: 50%;
+  opacity: 0;
+  animation: ai-update-ripple calc(var(--ds-duration-feedback) * 4) var(--ds-ease-standard);
+}
+@keyframes ai-update-ripple {
+  from {
+    transform: translate(-50%, -50%) scale(0);
+    opacity: 0.8;
+  }
+  to {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .preparation-ai-update,
+  .execution-ai-update,
+  .procedure-ai-update,
+  .preparation-ai-update::after,
+  .execution-ai-update::after,
+  .procedure-ai-update::after {
+    animation: none;
+  }
+}
+
+.ai-update-filter {
+  position: absolute;
+  pointer-events: none;
+}

@@ -1,3 +1,4 @@
+import { AIUpdateRipple } from "@/shared/ui/AIUpdateRipple";
 import { useEffect, useRef, useState } from "react";
 import {
   Bot,
@@ -84,6 +85,79 @@ export function PreparationPage(props: PreparationPageProps) {
   const workspaceConfirmButton = useRef<HTMLButtonElement>(null);
   const messagesRef = useRef<HTMLOListElement>(null);
   const followMessages = useRef(true);
+  const previousBrief = useRef<string[] | undefined>(undefined);
+  const previousPlan = useRef<string | undefined>(undefined);
+  const completedTurn = [...(snapshot?.conversation.items ?? [])]
+    .reverse()
+    .find((item) => item.role === "user" && item.status === "completed")?.turnId;
+  const previousCompletedTurn = useRef(completedTurn);
+  const aiBriefPending = useRef(false);
+  const aiPlanPending = useRef(false);
+  const [updatedBriefFields, setUpdatedBriefFields] = useState<number[]>([]);
+  const [planUpdated, setPlanUpdated] = useState(false);
+  const briefContent = JSON.stringify(
+    snapshot
+      ? [
+          snapshot.preparation.purpose,
+          snapshot.preparation.completionCriteria.join("\n"),
+          "ターミナル",
+          snapshot.preparation.intendedUsers,
+        ]
+      : [],
+  );
+  const planContent = JSON.stringify(snapshot?.checkPlan.items ?? null);
+  useEffect(() => {
+    const current = JSON.parse(briefContent) as string[];
+    const changed = current.flatMap((value, index) =>
+      previousBrief.current?.[index] !== undefined && previousBrief.current[index] !== value
+        ? [index]
+        : [],
+    );
+    previousBrief.current = current;
+    if (snapshot?.session?.state === "busy") aiBriefPending.current = true;
+    if (
+      (aiBriefPending.current || completedTurn !== previousCompletedTurn.current) &&
+      changed.length
+    ) {
+      setUpdatedBriefFields([]);
+      aiBriefPending.current = false;
+      let replayFrame = 0;
+      const frame = requestAnimationFrame(() => {
+        replayFrame = requestAnimationFrame(() => setUpdatedBriefFields(changed));
+      });
+      return () => {
+        cancelAnimationFrame(frame);
+        cancelAnimationFrame(replayFrame);
+      };
+    }
+    if (snapshot?.session?.state !== "busy") aiBriefPending.current = false;
+  }, [briefContent, snapshot?.session?.state, completedTurn]);
+  useEffect(() => {
+    if (snapshot?.session?.state === "busy") aiPlanPending.current = true;
+    if (
+      (aiPlanPending.current || completedTurn !== previousCompletedTurn.current) &&
+      previousPlan.current !== undefined &&
+      previousPlan.current !== "null" &&
+      previousPlan.current !== planContent
+    ) {
+      setPlanUpdated(false);
+      aiPlanPending.current = false;
+      let replayFrame = 0;
+      const frame = requestAnimationFrame(() => {
+        replayFrame = requestAnimationFrame(() => setPlanUpdated(true));
+      });
+      previousPlan.current = planContent;
+      return () => {
+        cancelAnimationFrame(frame);
+        cancelAnimationFrame(replayFrame);
+      };
+    }
+    if (snapshot?.session?.state !== "busy") aiPlanPending.current = false;
+    previousPlan.current = planContent;
+  }, [planContent, snapshot?.session?.state, completedTurn]);
+  useEffect(() => {
+    previousCompletedTurn.current = completedTurn;
+  }, [completedTurn]);
   useEffect(() => {
     if (workspaceConfirm) workspaceConfirmButton.current?.focus();
   }, [workspaceConfirm]);
@@ -144,6 +218,7 @@ export function PreparationPage(props: PreparationPageProps) {
   ];
   return (
     <main className="preparation-page" aria-labelledby="preparation-title">
+      <AIUpdateRipple />
       <header className="preparation-header">
         <div>
           <strong className="preparation-brand">
@@ -418,21 +493,21 @@ export function PreparationPage(props: PreparationPageProps) {
               </Button>
             </div>
             <dl className="preparation-summary">
-              <div>
+              <div className={updatedBriefFields.includes(0) ? "preparation-ai-update" : undefined}>
                 <dt>手順書の目的</dt>
                 <dd>{purpose || "未設定"}</dd>
               </div>
-              <div>
+              <div className={updatedBriefFields.includes(1) ? "preparation-ai-update" : undefined}>
                 <dt>完了条件</dt>
                 <dd>{criteria || "未設定"}</dd>
               </div>
-              <div>
+              <div className={updatedBriefFields.includes(2) ? "preparation-ai-update" : undefined}>
                 <dt>操作対象</dt>
                 <dd>
                   <Terminal size={15} /> ターミナル
                 </dd>
               </div>
-              <div>
+              <div className={updatedBriefFields.includes(3) ? "preparation-ai-update" : undefined}>
                 <dt>想定する利用者</dt>
                 <dd>{users || "未設定"}</dd>
               </div>
@@ -750,7 +825,9 @@ export function PreparationPage(props: PreparationPageProps) {
               </Button>
             </div>
             {editor !== "plan" && (
-              <ol className="preparation-plan-summary">
+              <ol
+                className={`preparation-plan-summary${planUpdated ? " preparation-ai-update" : ""}`}
+              >
                 {items.map((item, index) => (
                   <li key={item.clientKey}>
                     <span className="preparation-plan-number">{index + 1}</span>

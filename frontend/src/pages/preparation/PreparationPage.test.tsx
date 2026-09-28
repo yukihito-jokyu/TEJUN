@@ -50,6 +50,18 @@ const props: PreparationPageProps = {
   onSetConfigOption: vi.fn(),
 };
 
+const manualPlanItem = {
+  checkId: "manual",
+  sequence: 1,
+  title: "手動追加",
+  instruction: "確認する",
+  expectedResult: "成功",
+  suggestedCommand: "",
+  aiRequired: false,
+  humanRequired: true,
+  humanEvidenceRequirement: "none" as const,
+};
+
 it("コマンドの有無で人の証跡の必須表示を切り替える", () => {
   const onSavePlan = vi.fn();
   render(
@@ -86,6 +98,134 @@ it("コマンドの有無で人の証跡の必須表示を切り替える", () =
   expect(onSavePlan).toHaveBeenCalledWith([
     expect.objectContaining({ humanEvidenceRequirement: "text_or_image" }),
   ]);
+});
+
+it("AIが整理した内容の変更時だけ表示を強調する", () => {
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    callback(0);
+    return 1;
+  });
+  vi.stubGlobal("cancelAnimationFrame", vi.fn());
+  const { container, rerender } = render(<PreparationPage {...props} />);
+  expect(container.querySelector(".preparation-ai-update")).toBeNull();
+  rerender(<PreparationPage {...props} snapshot={{ ...snapshot }} />);
+  expect(container.querySelector(".preparation-ai-update")).toBeNull();
+  rerender(
+    <PreparationPage
+      {...props}
+      snapshot={{ ...snapshot, preparation: { ...snapshot.preparation, purpose: "手動変更" } }}
+    />,
+  );
+  expect(container.querySelector(".preparation-ai-update")).toBeNull();
+  rerender(
+    <PreparationPage
+      {...props}
+      snapshot={{
+        ...snapshot,
+        session: { ...snapshot.session!, state: "busy" },
+        preparation: { ...snapshot.preparation, purpose: "手動変更" },
+      }}
+    />,
+  );
+  rerender(
+    <PreparationPage
+      {...props}
+      snapshot={{ ...snapshot, preparation: { ...snapshot.preparation, purpose: "AIの目的" } }}
+    />,
+  );
+  expect(container.querySelector(".preparation-summary > .preparation-ai-update")).toBeTruthy();
+  expect(container.querySelectorAll(".preparation-summary > .preparation-ai-update")).toHaveLength(
+    1,
+  );
+  expect(
+    container.querySelector(".preparation-summary > div:nth-child(2).preparation-ai-update"),
+  ).toBeNull();
+  expect(container.querySelector(".preparation-plan-summary.preparation-ai-update")).toBeNull();
+  vi.unstubAllGlobals();
+});
+
+it("busyを受信せずAI完了結果だけを受信しても要約とチェック案を強調する", () => {
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    callback(0);
+    return 1;
+  });
+  vi.stubGlobal("cancelAnimationFrame", vi.fn());
+  const { container, rerender } = render(<PreparationPage {...props} />);
+  const completed = {
+    ...snapshot,
+    preparation: {
+      ...snapshot.preparation,
+      purpose: "AIの目的",
+      completionCriteria: ["AIの完了条件"],
+    },
+    checkPlan: { ...snapshot.checkPlan, items: [manualPlanItem] },
+    conversation: {
+      ...snapshot.conversation,
+      items: [
+        {
+          messageId: "request",
+          turnId: "turn",
+          role: "user" as const,
+          status: "completed" as const,
+          content: [{ type: "text", text: "準備して" }],
+        },
+      ],
+    },
+  };
+  rerender(<PreparationPage {...props} snapshot={completed} />);
+  expect(container.querySelector(".preparation-summary > .preparation-ai-update")).toBeTruthy();
+  expect(container.querySelector(".preparation-plan-summary.preparation-ai-update")).toBeTruthy();
+  expect(screen.getByText("AIの目的")).toBeTruthy();
+  expect(screen.getByText("AIの完了条件")).toBeTruthy();
+  vi.unstubAllGlobals();
+});
+
+it("AIが内容を変えずに終了した後の手動保存は強調しない", () => {
+  const busySnapshot = { ...snapshot, session: { ...snapshot.session!, state: "busy" as const } };
+  const { container, rerender } = render(<PreparationPage {...props} />);
+  rerender(<PreparationPage {...props} snapshot={busySnapshot} />);
+  rerender(<PreparationPage {...props} snapshot={snapshot} />);
+  rerender(
+    <PreparationPage
+      {...props}
+      snapshot={{
+        ...snapshot,
+        preparation: { ...snapshot.preparation, purpose: "手動変更" },
+        checkPlan: { ...snapshot.checkPlan, revision: 2, items: [manualPlanItem] },
+      }}
+    />,
+  );
+  expect(container.querySelector(".preparation-ai-update")).toBeNull();
+});
+
+it("AIがbriefだけ変えた後の手動plan保存は強調しない", () => {
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    callback(0);
+    return 1;
+  });
+  vi.stubGlobal("cancelAnimationFrame", vi.fn());
+  const busySnapshot = { ...snapshot, session: { ...snapshot.session!, state: "busy" as const } };
+  const { container, rerender } = render(<PreparationPage {...props} />);
+  rerender(<PreparationPage {...props} snapshot={busySnapshot} />);
+  rerender(
+    <PreparationPage
+      {...props}
+      snapshot={{ ...snapshot, preparation: { ...snapshot.preparation, purpose: "AIの目的" } }}
+    />,
+  );
+  expect(container.querySelector(".preparation-summary > .preparation-ai-update")).toBeTruthy();
+  rerender(
+    <PreparationPage
+      {...props}
+      snapshot={{
+        ...snapshot,
+        preparation: { ...snapshot.preparation, purpose: "AIの目的" },
+        checkPlan: { ...snapshot.checkPlan, revision: 2, items: [manualPlanItem] },
+      }}
+    />,
+  );
+  expect(container.querySelector(".preparation-plan-summary.preparation-ai-update")).toBeNull();
+  vi.unstubAllGlobals();
 });
 
 it("競合後の再取得でも編集中のbriefを保持する", () => {

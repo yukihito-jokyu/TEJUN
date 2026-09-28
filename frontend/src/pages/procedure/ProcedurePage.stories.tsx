@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import type { EvidenceDetail, ProcedureView } from "@/shared/api/wails/procedure";
 import { ProcedurePage } from "./ProcedurePage";
@@ -116,6 +117,49 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Draft: Story = {};
+export const AIUpdateAnimation: Story = {
+  name: "AI更新アニメーション",
+  render: function AIUpdateAnimationStory(args) {
+    const [current, setCurrent] = useState(view);
+    useEffect(() => {
+      const timer = window.setInterval(() => {
+        setCurrent((previous) => {
+          if (!previous.activeRevision) {
+            return {
+              ...previous,
+              activeRevision: {
+                sessionId: "session-1",
+                turnId: "turn-2",
+                jobId: "job-2",
+                status: "running",
+              },
+            };
+          }
+          const revision = previous.procedure.revision + 1;
+          return {
+            ...previous,
+            activeRevision: undefined,
+            procedure: {
+              ...previous.procedure,
+              revision,
+              document: {
+                ...previous.procedure.document,
+                overview: `AIが整理した手順書（更新${revision - 3}）。起動して画面とログを確認します。`,
+                steps: previous.procedure.document.steps.map((step) => ({
+                  ...step,
+                  description: `更新${revision - 3}：起動後に開始画面とエラーログを確認します。`,
+                })),
+              },
+            },
+          };
+        });
+      }, 1500);
+      return () => window.clearInterval(timer);
+    }, []);
+    return <ProcedurePage {...args} view={current} />;
+  },
+};
+
 export const Completed: Story = {
   args: { view: { ...view, procedure: { ...view.procedure, status: "completed" } } },
 };

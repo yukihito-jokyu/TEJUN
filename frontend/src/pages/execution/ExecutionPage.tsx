@@ -1,3 +1,4 @@
+import { AIUpdateRipple } from "@/shared/ui/AIUpdateRipple";
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
@@ -57,6 +58,44 @@ export function ExecutionPage({
   const [imageErrorCheckId, setImageErrorCheckId] = useState<string | null>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const followMessages = useRef(true);
+  const previousAI = useRef<Record<string, string> | undefined>(undefined);
+  const [updatedChecks, setUpdatedChecks] = useState<string[]>([]);
+  const aiResults = JSON.stringify(
+    view?.checks.map((check) => [
+      check.checkId,
+      check.ai.status,
+      check.ai.checked,
+      check.ai.failureSummary,
+      check.evidence.ai.map((item) => item.evidenceId),
+    ]) ?? [],
+  );
+  useEffect(() => {
+    const current = Object.fromEntries(
+      (view?.checks ?? []).map((check) => [
+        check.checkId,
+        JSON.stringify([
+          check.ai.status,
+          check.ai.checked,
+          check.ai.failureSummary,
+          check.evidence.ai.map((item) => item.evidenceId),
+        ]),
+      ]),
+    );
+    const changed = Object.keys(current).filter(
+      (id) => previousAI.current?.[id] !== undefined && previousAI.current[id] !== current[id],
+    );
+    previousAI.current = current;
+    if (!changed.length) return;
+    setUpdatedChecks([]);
+    let replayFrame = 0;
+    const frame = requestAnimationFrame(() => {
+      replayFrame = requestAnimationFrame(() => setUpdatedChecks(changed));
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      cancelAnimationFrame(replayFrame);
+    };
+  }, [aiResults, view?.checks]);
   useEffect(() => {
     if (followMessages.current && messagesRef.current) {
       messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
@@ -113,6 +152,7 @@ export function ExecutionPage({
 
   return (
     <main className="execution-page" aria-label="動作チェック">
+      <AIUpdateRipple />
       <header className="execution-header">
         <div>
           <strong className="execution-brand">
@@ -424,7 +464,7 @@ export function ExecutionPage({
                     </div>
                     <div className="execution-check-columns">
                       <section
-                        className="execution-check-side is-ai"
+                        className={`execution-check-side is-ai${updatedChecks.includes(check.checkId) ? " execution-ai-update" : ""}`}
                         aria-label={check.title + "のAIチェック"}
                       >
                         <div className="execution-check-heading">

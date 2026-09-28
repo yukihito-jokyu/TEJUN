@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import type { ExecutionView } from "@/shared/api/wails/execution";
 import { ExecutionPage } from "./ExecutionPage";
@@ -100,6 +101,28 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Ready: Story = {};
+export const AIUpdateAnimation: Story = {
+  name: "AI更新アニメーション",
+  render: function AIUpdateAnimationStory(args) {
+    const [current, setCurrent] = useState(view);
+    useEffect(() => {
+      const timer = window.setInterval(() => {
+        setCurrent((previous) => ({
+          ...previous,
+          checks: previous.checks.map((check) => ({
+            ...check,
+            ai: check.ai.checked
+              ? { ...side(true, false, "failed"), failureSummary: "表示を再確認してください。" }
+              : side(true, true, "completed"),
+          })),
+        }));
+      }, 3000);
+      return () => window.clearInterval(timer);
+    }, []);
+    return <ExecutionPage {...args} view={current} />;
+  },
+};
+
 export const Running: Story = {
   args: {
     view: {
