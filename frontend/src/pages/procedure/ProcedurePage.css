@@ -7,6 +7,7 @@
   color: var(--foreground);
   background: var(--background);
 }
+
 .procedure-page > [aria-busy] {
   flex: 1;
   min-height: 0;
