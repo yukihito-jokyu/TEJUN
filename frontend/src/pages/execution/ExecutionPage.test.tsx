@@ -30,6 +30,49 @@ const view = {
 
 afterEach(cleanup);
 describe("ExecutionPage", () => {
+  it("AI判定の変更時だけ該当欄を強調する", () => {
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const input = {
+      view,
+      loading: false,
+      busy: false,
+      error: "",
+      onRun: vi.fn(),
+      onHumanCheck: vi.fn(),
+      onEvidence: vi.fn(),
+      onPermission: vi.fn(),
+      onGenerate: vi.fn(),
+    };
+    const { container, rerender } = render(<ExecutionPage {...input} />);
+    expect(container.querySelector(".execution-ai-update")).toBeNull();
+    rerender(<ExecutionPage {...input} view={{ ...view }} />);
+    expect(container.querySelector(".execution-ai-update")).toBeNull();
+    rerender(
+      <ExecutionPage
+        {...input}
+        view={{
+          ...view,
+          checks: [
+            {
+              ...view.checks[0],
+              ai: {
+                ...view.checks[0].ai,
+                status: "failed",
+                checked: false,
+                failureSummary: "失敗",
+              },
+            },
+          ],
+        }}
+      />,
+    );
+    expect(container.querySelector(".execution-check-side.execution-ai-update")).toBeTruthy();
+    vi.unstubAllGlobals();
+  });
   it("必要な証跡が保存されるまで人間チェックを押せない", () => {
     const { rerender } = render(
       <ExecutionPage
