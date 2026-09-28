@@ -366,6 +366,20 @@ test("AIの返答とツール作業を処理中に表示する", async ({ page }
       .count(),
   ).toBe(1);
 
+  const summary = page.locator(".preparation-summary");
+  const plan = page.locator(".preparation-plan-summary");
+  for (const target of [summary, plan]) {
+    await target.evaluate((element) => {
+      element.addEventListener("animationstart", () => {
+        element.dataset.animationStarted = "true";
+      });
+    });
+  }
+  state.preparation.purpose = "AIが更新した目的";
+  state.preparation.completionCriteria = ["AIが更新した完了条件"];
+  state.preparation.revision++;
+  state.checkPlan.items[0].title = "AIが更新したチェック案";
+  state.checkPlan.revision++;
   state.activity = undefined;
   state.session.state = "ready";
   state.conversation.items[0].status = "completed";
@@ -392,6 +406,17 @@ test("AIの返答とツール作業を処理中に表示する", async ({ page }
       content: [{ text: "手順を整理しました。" }],
     },
   );
+  await expect(summary).toContainText("AIが更新した目的");
+  await expect(summary.locator(":scope > .preparation-ai-update")).toHaveCount(2);
+  await expect(summary).not.toHaveClass(/preparation-ai-update/);
+  await expect(summary.locator(":scope > div").nth(0)).toHaveCSS("clip-path", "none");
+  await expect(summary.locator(":scope > div").nth(1)).toHaveCSS("clip-path", "none");
+  await expect(summary.locator(":scope > div").nth(2)).not.toHaveClass(/preparation-ai-update/);
+  await expect(summary.locator(":scope > div").nth(3)).not.toHaveClass(/preparation-ai-update/);
+  await expect(summary).toContainText("AIが更新した完了条件");
+  await expect(plan).toContainText("AIが更新したチェック案");
+  await expect(summary).toHaveAttribute("data-animation-started", "true");
+  await expect(plan).toHaveAttribute("data-animation-started", "true");
   await expect(page.getByText("AIが回答中")).toHaveCount(0);
   await expect(page.getByText("完了：READMEを読む")).toBeVisible();
   await expect(page.getByText("READMEを確認しています。")).toBeVisible();
