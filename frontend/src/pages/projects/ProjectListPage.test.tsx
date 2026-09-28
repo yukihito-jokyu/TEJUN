@@ -417,8 +417,10 @@ it("保存先選択取消は送信せず、既存file identityを確認して同
   render(<ProjectListPage />, { wrapper: MemoryRouter });
   await screen.findAllByText("手順書 A");
   selectProjectAction("出力");
+  fireEvent.change(screen.getByLabelText("出力形式"), { target: { value: "html" } });
   fireEvent.click(screen.getByRole("button", { name: "保存先を選ぶ" }));
   await waitFor(() => expect(chooseExportDestination).toHaveBeenCalledTimes(1));
+  expect(chooseExportDestination).toHaveBeenCalledWith(expect.anything(), "html");
   expect(exportProcedure).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "保存先を選ぶ" }));
   await screen.findByText(/現在のサイズ 42 バイト/);
@@ -427,6 +429,7 @@ it("保存先選択取消は送信せず、既存file identityを確認して同
   await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("alert")));
   fireEvent.click(screen.getByRole("button", { name: "既存ファイルを置き換えて出力" }));
   await waitFor(() => expect(exportProcedure).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(exportProcedure).mock.calls[0][1]).toBe("html");
   expect(vi.mocked(exportProcedure).mock.calls[0][2]).toMatchObject({
     overwriteIdentity: { sha256: "abc" },
   });
