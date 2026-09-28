@@ -86,7 +86,7 @@ function ProjectStory({ scenario }: { scenario: Scenario }) {
     setTransport({
       call: async (objectID: number, method: number, _windowName: string, args: unknown) => {
         if (objectID === 5 && method === 5 && scenario.startsWith("export")) {
-          return "/Users/demo/手順書.pdf";
+          return scenario === "exportNew" ? "/Users/demo/手順書.html" : "/Users/demo/手順書.pdf";
         }
         if (objectID !== 0 || method !== 0 || !args || typeof args !== "object") {
           throw new Error("Storyで未対応のWails呼出しです");
@@ -95,11 +95,13 @@ function ProjectStory({ scenario }: { scenario: Scenario }) {
         if (request.methodID === 199265905 && scenario.startsWith("export")) {
           return {
             destination: {
-              absolutePath: "/Users/demo/手順書.pdf",
-              resolvedPath: "/Users/demo/手順書.pdf",
+              absolutePath:
+                scenario === "exportNew" ? "/Users/demo/手順書.html" : "/Users/demo/手順書.pdf",
+              resolvedPath:
+                scenario === "exportNew" ? "/Users/demo/手順書.html" : "/Users/demo/手順書.pdf",
               verifiedRootId: "story-root",
             },
-            destinationDisplayName: "手順書.pdf",
+            destinationDisplayName: scenario === "exportNew" ? "手順書.html" : "手順書.pdf",
             overwriteRequired: scenario !== "exportNew",
             overwriteIdentity:
               scenario === "exportNew"
@@ -254,7 +256,12 @@ export const RevisionDialog: Story = {
 export const ExportNewFile: Story = {
   render: () => <ProjectStory scenario="exportNew" />,
   play: async ({ canvasElement }) => {
-    await chooseStoryDestination(canvasElement);
+    await openCompletedAction(canvasElement, "出力");
+    const select = await waitForButton(document, "[role='dialog'] #export-format");
+    select.value = "html";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    (await waitForButton(document, "[role='dialog'] button:nth-of-type(1)")).click();
+    await waitForButton(document, "[role='dialog'] [role='status']");
   },
 };
 export const ExportOverwrite: Story = {

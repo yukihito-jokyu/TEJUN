@@ -308,6 +308,31 @@ test("手順書を編集し、分離した証跡を確認して完成・出力�
     format: "pdf",
     overwriteConfirmed: true,
   });
+
+  mock.path(null);
+  const preparesBeforeCancel = mock.calls.filter((call) => call.id === method.prepareExport).length;
+  const exportsBeforeCancel = mock.calls.filter((call) => call.id === method.export).length;
+  await page.getByRole("button", { name: "HTMLを出力" }).click();
+  await expect(page.getByRole("button", { name: "HTMLを出力" })).toBeEnabled();
+  expect(mock.calls.filter((call) => call.id === method.prepareExport)).toHaveLength(
+    preparesBeforeCancel,
+  );
+  expect(mock.calls.filter((call) => call.id === method.export)).toHaveLength(exportsBeforeCancel);
+  mock.path("/tmp/procedure.html");
+  page.once("dialog", (nativeDialog) => nativeDialog.accept());
+  await page.getByRole("button", { name: "HTMLを出力" }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "HTMLの出力を受け付けました" }),
+  ).toBeVisible();
+  expect(mock.calls.filter((call) => call.id === method.export)).toHaveLength(
+    exportsBeforeCancel + 1,
+  );
+  expect(mock.calls.filter((call) => call.id === method.export).at(-1)?.input).toMatchObject({
+    procedureId: "procedure-p",
+    procedureRevision: 3,
+    format: "html",
+    overwriteConfirmed: true,
+  });
 });
 
 test("手順が多くても画面全体ではなく手順書本文をスクロールできる", async ({ page }) => {

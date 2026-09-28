@@ -61,7 +61,7 @@ export function ProjectActionDialog({
   const [workspacePath, setWorkspacePath] = useState(
     (action === "duplicate" || action === "revision") && selected ? selected.workspacePath : "",
   );
-  const [format, setFormat] = useState<"markdown" | "pdf">("pdf");
+  const [format, setFormat] = useState<"markdown" | "pdf" | "html">("pdf");
   const [prepared, setPrepared] = useState<PreparedExportProcedure | null>(null);
   const [actionError, setActionError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -279,12 +279,13 @@ export function ProjectActionDialog({
                 value={format}
                 disabled={submitting}
                 onChange={(event) => {
-                  setFormat(event.target.value as "markdown" | "pdf");
+                  setFormat(event.target.value as "markdown" | "pdf" | "html");
                   setPrepared(null);
                 }}
               >
                 <option value="pdf">PDF</option>
                 <option value="markdown">Markdown</option>
+                <option value="html">HTML</option>
               </select>
               <Button
                 type="button"

@@ -93,3 +93,29 @@ it("保存先選択取消はprepareせず、確認済みidentityをexportへ渡�
     operationId: "op",
   });
 });
+
+it("HTMLの保存先と形式をWailsへ渡す", async () => {
+  vi.mocked(Dialogs.SaveFile).mockResolvedValue("/tmp/out.html");
+  const prepared = {
+    destination: {
+      absolutePath: "/tmp/out.html",
+      resolvedPath: "/tmp/out.html",
+      verifiedRootId: "root",
+    },
+    overwriteIdentity: null,
+    destinationDisplayName: "out.html",
+    overwriteRequired: false,
+  };
+  vi.mocked(ProjectService.PrepareExportProcedure).mockResolvedValue(prepared);
+  expect(await chooseExportDestination(project, "html")).toEqual(prepared);
+  expect(Dialogs.SaveFile).toHaveBeenCalledWith(
+    expect.objectContaining({
+      Filename: `${project.name}.html`,
+      Filters: [{ DisplayName: "HTML", Pattern: "*.html" }],
+    }),
+  );
+  await exportProcedure(project, "html", prepared, "html-op");
+  expect(ProjectService.ExportProcedure).toHaveBeenCalledWith(
+    expect.objectContaining({ format: "html", operationId: "html-op" }),
+  );
+});

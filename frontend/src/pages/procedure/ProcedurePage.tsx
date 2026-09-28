@@ -36,7 +36,11 @@ type Props = {
     operationId: string,
   ) => Promise<void>;
   onComplete: (expectedRevision: number, operationId: string) => Promise<void>;
-  onExport: (format: "markdown" | "pdf", revision: number, operationId: string) => Promise<boolean>;
+  onExport: (
+    format: "markdown" | "pdf" | "html",
+    revision: number,
+    operationId: string,
+  ) => Promise<boolean>;
   onLoadEvidence: (evidenceId: string, cursor?: string) => Promise<EvidenceDetail>;
   onLoadPreviousConversation?: (cursor: number) => Promise<ProcedureView["conversation"]>;
 };
@@ -778,6 +782,20 @@ function ProcedureContent({
                         }
                       >
                         Markdownを出力
+                      </Button>
+                      <Button
+                        variant="outline"
+                        disabled={!!busy}
+                        loading={busy === "html"}
+                        onClick={() =>
+                          void run(
+                            "html",
+                            (id) => onExport("html", procedure!.revision, id),
+                            "HTMLの出力を受け付けました。",
+                          )
+                        }
+                      >
+                        HTMLを出力
                       </Button>
                       <Button
                         variant="outline"

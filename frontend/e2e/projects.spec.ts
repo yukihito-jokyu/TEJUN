@@ -90,6 +90,8 @@ async function mockProjects(
     firstCreateFailure?: boolean;
     firstMoreFailure?: boolean;
     firstExportFailure?: boolean;
+    exportPath?: string;
+    overwriteExport?: boolean;
   } = {},
 ) {
   const calls: { id: number; input: Record<string, unknown> }[] = [];
@@ -99,10 +101,12 @@ async function mockProjects(
   let createFailures = 0;
   let moreFailures = 0;
   let exportFailures = 0;
+  const saveDialogs: unknown[] = [];
   await page.route("**/wails/runtime", async (route) => {
     const body = route.request().postDataJSON() as Call;
     if (body.object === 5 && body.method === 5) {
-      return route.fulfill({ json: "/tmp/export.pdf" });
+      saveDialogs.push(body.args);
+      return route.fulfill({ json: options.exportPath ?? "/tmp/export.pdf" });
     }
     const call = body.args as { methodID?: number; args?: unknown[] } | undefined;
     const id = call?.methodID;
@@ -168,18 +172,20 @@ async function mockProjects(
       expect(input).toMatchObject({
         procedureId: "procedure-b",
         procedureRevision: 3,
-        absolutePath: "/tmp/export.pdf",
+        absolutePath: options.exportPath ?? "/tmp/export.pdf",
       });
       return route.fulfill({
         json: {
           destination: {
-            absolutePath: "/tmp/export.pdf",
-            resolvedPath: "/tmp/export.pdf",
+            absolutePath: options.exportPath ?? "/tmp/export.pdf",
+            resolvedPath: options.exportPath ?? "/tmp/export.pdf",
             verifiedRootId: "root",
           },
-          overwriteIdentity: null,
-          destinationDisplayName: "export.pdf",
-          overwriteRequired: false,
+          overwriteIdentity: options.overwriteExport
+            ? { device: 1, inode: 2, size: 3, modifiedNanos: 4 }
+            : null,
+          destinationDisplayName: options.exportPath?.split("/").at(-1) ?? "export.pdf",
+          overwriteRequired: options.overwriteExport ?? false,
         },
       });
     }
@@ -223,6 +229,7 @@ async function mockProjects(
   });
   return {
     calls,
+    saveDialogs,
     update(projectId: string, changes: Partial<(typeof saved)[number]>) {
       const project = saved.find((item) => item.projectId === projectId);
       expect(project).toBeDefined();
@@ -496,6 +503,34 @@ test("出力失敗後も完成版を表示し、同じ操作IDで再試行でき
   expect(exports[0].input.operationId).toBe(exports[1].input.operationId);
   await page.reload();
   await expect(row(page, "完成B")).toBeVisible();
+});
+
+test("一覧からHTMLを選び、既存ファイルへの出力失敗を再試行する", async ({ page }) => {
+  const { calls, saveDialogs } = await mockProjects(page, {
+    exportPath: "/tmp/export.html",
+    overwriteExport: true,
+    firstExportFailure: true,
+  });
+  await openList(page);
+  await selectRowAction(page, "完成B", "出力");
+  await page.getByLabel("出力形式").selectOption("html");
+  await page.getByRole("button", { name: "保存先を選ぶ" }).click();
+  await expect(page.getByText("既存ファイルを置き換えます。", { exact: false })).toBeVisible();
+  expect(JSON.stringify(saveDialogs)).toContain('"Pattern":"*.html"');
+  expect(JSON.stringify(saveDialogs)).toContain('"Filename":"完成B.html"');
+  await page.getByRole("button", { name: "既存ファイルを置き換えて出力" }).click();
+  await expect(page.getByRole("dialog").getByRole("alert")).toContainText("出力に失敗しました");
+  await page.getByRole("button", { name: "既存ファイルを置き換えて出力" }).click();
+  await expect(page.getByText("出力を受け付けました")).toBeVisible();
+  const exports = calls.filter((call) => call.id === method.export);
+  expect(exports).toHaveLength(2);
+  expect(exports[0].input).toMatchObject({
+    procedureId: "procedure-b",
+    procedureRevision: 3,
+    format: "html",
+    overwriteConfirmed: true,
+  });
+  expect(exports[0].input.operationId).toBe(exports[1].input.operationId);
 });
 
 test("削除は赤い確認ボタンを経て実行し、対象だけ一覧から消す", async ({ page }) => {

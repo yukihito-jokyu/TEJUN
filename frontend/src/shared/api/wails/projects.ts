@@ -105,16 +105,24 @@ export function createRevision(
   });
 }
 
-export async function chooseExportDestination(source: ProjectSummary, format: "markdown" | "pdf") {
+export async function chooseExportDestination(
+  source: ProjectSummary,
+  format: "markdown" | "pdf" | "html",
+) {
   const procedureId = source.currentProcedureId;
   const procedureRevision = source.currentProcedureRevision;
   if (!procedureId || procedureRevision == null)
     throw new Error("完成版の手順書情報を取得できません。再読み込みしてください");
-  const extension = format === "pdf" ? "pdf" : "md";
+  const extension = format === "pdf" ? "pdf" : format === "html" ? "html" : "md";
   const path = await Dialogs.SaveFile({
     Title: "手順書の保存先を選ぶ",
     Filename: `${source.name}.${extension}`,
-    Filters: [{ DisplayName: format === "pdf" ? "PDF" : "Markdown", Pattern: `*.${extension}` }],
+    Filters: [
+      {
+        DisplayName: format === "pdf" ? "PDF" : format === "html" ? "HTML" : "Markdown",
+        Pattern: `*.${extension}`,
+      },
+    ],
   });
   if (!path) return null;
   return prepareExportDestination(path, () =>
@@ -124,7 +132,7 @@ export async function chooseExportDestination(source: ProjectSummary, format: "m
 
 export function exportProcedure(
   source: ProjectSummary,
-  format: "markdown" | "pdf",
+  format: "markdown" | "pdf" | "html",
   prepared: PreparedExportProcedure,
   operationId: string,
 ) {

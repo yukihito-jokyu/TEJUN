@@ -3,9 +3,11 @@ package export
 import (
 	"bytes"
 	_ "embed"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"image"
 	"image/jpeg"
 	"image/png"
@@ -70,9 +72,101 @@ func RenderWithEvidence(
 		return err
 	case "pdf":
 		return pdf(document, procedureID, read, output)
+	case "html":
+		return html(document, procedureID, read, output)
 	default:
 		return fmt.Errorf("未対応の出力形式です")
 	}
+}
+
+const htmlDocument = `<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}}</title><style>
+body{font-family:system-ui,sans-serif;line-height:1.7;max-width:52rem;margin:2rem auto;padding:0 1.25rem;color:#222}
+pre{overflow-x:auto;background:#f4f4f4;padding:1rem}img{max-width:100%;height:auto}section{margin:2rem 0}
+</style></head><body><main><h1>{{.Title}}</h1>
+{{if .Overview}}<section><h2>概要</h2><p>{{.Overview}}</p></section>{{end}}
+{{if .Prerequisites}}<section><h2>前提条件</h2><ul>{{range .Prerequisites}}<li>{{.}}</li>{{end}}</ul></section>{{end}}
+{{range $index, $step := .Steps}}<section><h2>{{add $index 1}}. {{$step.Title}}</h2>
+{{if $step.Description}}<p>{{$step.Description}}</p>{{end}}
+{{if $step.Command}}<pre><code>{{$step.Command}}</code></pre>{{end}}
+{{range $step.Notes}}<p><strong>注意:</strong> {{.}}</p>{{end}}
+{{range $step.Evidence}}<figure><figcaption>証跡: {{.DisplayName}}</figcaption>{{if .Text}}<pre>{{.Text}}</pre>{{end}}{{if .Image}}<img src="{{.Image}}" alt="{{.DisplayName}}">{{end}}</figure>{{end}}
+</section>{{end}}</main></body></html>`
+
+var htmlTemplate = template.Must(template.New("procedure").Funcs(template.FuncMap{
+	"add": func(a, b int) int { return a + b },
+}).Parse(htmlDocument))
+
+func html(
+	document Document,
+	procedureID string,
+	read func(string, string) (EvidenceContent, error),
+	output io.Writer,
+) error {
+	type evidenceView struct {
+		DisplayName string
+		Text        string
+		Image       template.URL
+	}
+
+	type stepView struct {
+		Step
+		Evidence []evidenceView
+	}
+
+	view := struct {
+		Title         string
+		Overview      string
+		Prerequisites []string
+		Steps         []stepView
+	}{document.Title, document.Overview, document.Prerequisites, make([]stepView, 0, len(document.Steps))}
+
+	for _, step := range document.Steps {
+		current := stepView{Step: step}
+		for _, ref := range step.EvidenceRefs {
+			evidence := evidenceView{DisplayName: ref.DisplayName}
+			if ref.Included {
+				if ref.EvidenceID == "" || read == nil {
+					return fmt.Errorf("証跡を読み取れません")
+				}
+
+				content, err := read(procedureID, ref.EvidenceID)
+				if err != nil {
+					return err
+				}
+
+				switch content.Kind {
+				case "text":
+					if len(content.Data) > 64<<10 {
+						return fmt.Errorf("証跡のテキストが大きすぎます")
+					}
+
+					evidence.Text = string(content.Data)
+				case "image":
+					data, _, _, err := normalizeEvidenceImage(content.Data)
+					if err != nil {
+						return err
+					}
+
+					mime := "image/png"
+					if bytes.HasPrefix(data, []byte{0xff, 0xd8}) {
+						mime = "image/jpeg"
+					}
+
+					evidence.Image = template.URL("data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data))
+				default:
+					return fmt.Errorf("証跡の種類が不正です")
+				}
+			}
+
+			current.Evidence = append(current.Evidence, evidence)
+		}
+
+		view.Steps = append(view.Steps, current)
+	}
+
+	return htmlTemplate.Execute(output, view)
 }
 
 func markdown(document Document) string {
