@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { useCallback, useEffect, useState } from "react";
 import { userEvent, within } from "storybook/test";
 
 import type { PreparationView } from "@/shared/api/wails/preparation";
@@ -103,6 +104,89 @@ export const Empty: Story = {
   },
 };
 export const ReadyToStart: Story = {};
+export const AIUpdateAnimation: Story = {
+  name: "AI更新アニメーション",
+  parameters: {
+    docs: {
+      description: {
+        story:
+          "3秒ごとに目的→完了条件→想定する利用者→動作チェック案を一つずつ更新し、変更箇所だけに波紋を表示します。相談欄から送信しても再生できます。OSの動きを減らす設定が有効な場合は動きません。",
+      },
+    },
+  },
+  render: function AIUpdateAnimationStory(args) {
+    const [view, setView] = useState(snapshot);
+    const update = useCallback(
+      (text: string) =>
+        setView((current) => {
+          const revision = current.preparation.revision + 1;
+          const phase = (revision - 2) % 4;
+          return {
+            ...current,
+            preparation: {
+              ...current.preparation,
+              purpose:
+                phase === 0
+                  ? `AIが整理した目的（更新${revision - 1}）：${text}`
+                  : current.preparation.purpose,
+              completionCriteria:
+                phase === 1
+                  ? [`更新${revision - 1}の手順を再現できる`]
+                  : current.preparation.completionCriteria,
+              intendedUsers:
+                phase === 2
+                  ? `更新${revision - 1}：新しく参加したチームメンバー`
+                  : current.preparation.intendedUsers,
+              revision,
+            },
+            checkPlan: {
+              ...current.checkPlan,
+              revision,
+              items: current.checkPlan.items.map((item) => ({
+                ...item,
+                title: phase === 3 ? `更新${revision - 1}の動作を確認する` : item.title,
+              })),
+            },
+            conversation: {
+              ...current.conversation,
+              items: [
+                ...snapshot.conversation.items,
+                {
+                  messageId: `request-${revision}`,
+                  turnId: `turn-${revision}`,
+                  role: "user",
+                  status: "completed",
+                  content: [{ text }],
+                },
+                {
+                  messageId: `answer-${revision}`,
+                  turnId: `turn-${revision}`,
+                  role: "agent",
+                  status: "completed",
+                  content: [{ text: "右の目的・完了条件・動作チェック案を更新しました。" }],
+                },
+              ],
+            },
+          };
+        }),
+      [],
+    );
+    useEffect(() => {
+      const timer = window.setInterval(
+        () => update("目的・完了条件・動作チェック案を更新して"),
+        3000,
+      );
+      return () => window.clearInterval(timer);
+    }, [update]);
+    return <PreparationPage {...args} snapshot={view} onSendMessage={update} />;
+  },
+  play: async ({ canvasElement }) => {
+    await userEvent.type(
+      within(canvasElement).getByLabelText("AIに相談する"),
+      "目的・完了条件・動作チェック案を更新して",
+    );
+  },
+};
 export const PastChat: Story = {
   args: {
     selectedChatId: "session-old",
