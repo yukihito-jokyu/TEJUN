@@ -68,3 +68,17 @@ it("取得時に会話cursorを渡し、保存先選択取消では出力しな�
   expect(ProcedureService.PrepareExportProcedure).not.toHaveBeenCalled();
   expect(ProcedureService.ExportProcedure).not.toHaveBeenCalled();
 });
+
+it("HTML出力の保存先フィルタと取消を扱う", async () => {
+  const view = { project: { name: "Project" }, procedure: { procedureId: "d" } } as Parameters<
+    typeof exportCompletedProcedure
+  >[0];
+  vi.mocked(Dialogs.SaveFile).mockResolvedValue("");
+  expect(await exportCompletedProcedure(view, "html", 2, "html-op")).toBe(false);
+  expect(Dialogs.SaveFile).toHaveBeenCalledWith(
+    expect.objectContaining({
+      Filename: "Project.html",
+      Filters: [{ DisplayName: "HTML", Pattern: "*.html" }],
+    }),
+  );
+});

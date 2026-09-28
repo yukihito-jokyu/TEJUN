@@ -216,15 +216,20 @@ export async function getProcedureEvidence(
 
 export async function exportCompletedProcedure(
   view: ProcedureView,
-  format: "markdown" | "pdf",
+  format: "markdown" | "pdf" | "html",
   revision: number,
   operationId: string,
 ): Promise<boolean> {
-  const extension = format === "pdf" ? "pdf" : "md";
+  const extension = format === "pdf" ? "pdf" : format === "html" ? "html" : "md";
   const path = await Dialogs.SaveFile({
     Title: "手順書の保存先を選ぶ",
     Filename: `${view.project.name}.${extension}`,
-    Filters: [{ DisplayName: format === "pdf" ? "PDF" : "Markdown", Pattern: `*.${extension}` }],
+    Filters: [
+      {
+        DisplayName: format === "pdf" ? "PDF" : format === "html" ? "HTML" : "Markdown",
+        Pattern: `*.${extension}`,
+      },
+    ],
   });
   if (!path) return false;
   const procedureId = view.procedure.procedureId;
