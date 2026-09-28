@@ -1,3 +1,4 @@
+import { AIUpdateRipple } from "@/shared/ui/AIUpdateRipple";
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Bot, ChevronRight, Terminal, UserRound } from "lucide-react";
 import { FoldWelcomeCharacterIcon } from "@/components/icons/FoldWelcomeCharacterIcon";
@@ -109,6 +110,36 @@ function ProcedureContent({
     { summary: EvidenceSummary; related: EvidenceSummary[] } | undefined
   >(undefined);
   const evidencePending = useRef<number | undefined>(undefined);
+  const previousDocument = useRef<string | undefined>(undefined);
+  const aiRevisionStarted = useRef(false);
+  const revisionWasActive = useRef(false);
+  const [documentUpdated, setDocumentUpdated] = useState(false);
+  const documentContent = JSON.stringify(view?.procedure.document ?? null);
+  useEffect(() => {
+    if (view?.activeRevision) aiRevisionStarted.current = true;
+    if (
+      aiRevisionStarted.current &&
+      previousDocument.current !== undefined &&
+      previousDocument.current !== "null" &&
+      previousDocument.current !== documentContent
+    ) {
+      setDocumentUpdated(false);
+      aiRevisionStarted.current = false;
+      previousDocument.current = documentContent;
+      revisionWasActive.current = !!view?.activeRevision;
+      let replayFrame = 0;
+      const frame = requestAnimationFrame(() => {
+        replayFrame = requestAnimationFrame(() => setDocumentUpdated(true));
+      });
+      return () => {
+        cancelAnimationFrame(frame);
+        cancelAnimationFrame(replayFrame);
+      };
+    }
+    if (revisionWasActive.current && !view?.activeRevision) aiRevisionStarted.current = false;
+    revisionWasActive.current = !!view?.activeRevision;
+    previousDocument.current = documentContent;
+  }, [documentContent, view?.activeRevision]);
 
   useEffect(() => {
     active.current = true;
@@ -303,6 +334,7 @@ function ProcedureContent({
 
   return (
     <main className="procedure-page" aria-labelledby="procedure-title">
+      <AIUpdateRipple />
       <header className="procedure-header">
         <div>
           <strong className="procedure-brand">
@@ -616,7 +648,9 @@ function ProcedureContent({
                   )}
                 </AlertDescription>
               </Alert>
-              <article className="procedure-document">
+              <article
+                className={`procedure-document${documentUpdated ? " procedure-ai-update" : ""}`}
+              >
                 <section className="procedure-intro">
                   <h3>この手順書について</h3>
                   <p>{document.overview}</p>
