@@ -76,6 +76,7 @@ app → pages → widgets → features → entities → shared
 | `src/entities/<業務概念>` | 業務概念の型、表示、純粋な変換 | 画面遷移、利用者操作の完結した流れ |
 | `src/shared/api/wails` | 生成Bindingの唯一のimport入口、DTO正規化、error変換 | 画面固有処理 |
 | `src/shared/lib` | framework非依存の横断的な小さい処理 | feature固有処理 |
+| `src/shared/ui` | 業務語彙を持たず複数画面で共有する表示効果（AI更新の波紋・屈折など） | 画面固有UI、Design System Registry部品の手書き代替 |
 | `src/components` | Design System Registryから必要時に導入したUI、Pattern、Character、Icon、ThemeProvider | 手書きの独自部品、将来用の雛形 |
 
 新しい画面は`pages`、利用者操作は`features`、業務概念は`entities`から検討する。複数画面で独立して再利用する領域になった場合だけ`widgets`へ置く。二つ以上の呼出し元があるという理由だけで`shared`へ移さず、業務語彙と上位layerへの依存がなくなった場合だけ共通化する。
